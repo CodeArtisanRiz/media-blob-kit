@@ -1,5 +1,6 @@
 mod entities;
 mod routes;
+mod middleware;
 
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHasher, SaltString},

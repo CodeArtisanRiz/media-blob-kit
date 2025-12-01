@@ -16,20 +16,32 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [ ] Configure `tracing-subscriber` for structured logging.
 
 ## Phase 2: Authentication & User Management
-**Goal**: Implement secure user registration, login, and profile management.
+**Goal**: Implement secure user login and user creation by superusers only.
 
 - [x] **User Models & Migrations**
-    - [x] Define `User` struct.
-    - [x] Create migration for `users` (id, email, password_hash, created_at, etc.).
+    - [x] Define `User` struct with role enum (su, admin, user).
+    - [x] Create migration for `users` (id, username, password, role, created_at).
 - [x] **Auth Logic**
-    - [x] Implement password hashing using `argon2` or `bcrypt`.
+    - [x] Implement password hashing using `argon2`.
     - [x] Implement JWT token generation and validation.
-- [ ] **Auth Endpoints**
-    - [ ] `POST /auth/register`: Create new user.
-    - [x] `POST /auth/login`: Validate credentials and return JWT.
-    - [ ] `GET /auth/me`: Get current user profile (protected).
-- [ ] **Middleware**
-    - [ ] Create an `AuthMiddleware` to validate JWT and inject `UserId` into extensions.
+    - [x] Implement refresh token system.
+- [x] **Auth Endpoints**
+    - [x] `POST /auth/login`: Validate credentials and return access + refresh tokens.
+    - [x] `POST /auth/refresh`: Get new access token using refresh token.
+    - [x] `POST /auth/logout`: Revoke refresh token.
+    - [x] `GET /auth/me`: Get current user profile (protected).
+- [x] **User Management** (Su-only)
+    - [x] `POST /users`: Create new user (admin or user role) - requires su authentication.
+    - [x] `GET /users`: List all users - requires su authentication.
+    - [x] `DELETE /users/{id}`: Delete user - requires su authentication.
+- [x] **Middleware**
+    - [x] Create an `AuthMiddleware` to validate JWT and inject `UserId` into extensions.
+    - [x] Create role-based authorization middleware.
+
+**Note**: Superuser (su) accounts can only be created via CLI command `create-superuser` (requires shell access).
+
+**JWT Token Limitation**: Access tokens are stateless JWTs with 15-minute expiration. When a user logs out, the refresh token is immediately revoked, but the access token remains valid until expiration (up to 15 minutes). This is standard JWT behavior. For immediate token revocation, a Redis-based token blacklist can be implemented in the future.
+
 
 ## Phase 3: Project Management
 **Goal**: Allow users to create and manage projects with specific settings.

@@ -103,12 +103,12 @@ pub async fn login(
         {
             println!("Password verified");
             
-            // Generate access token (1 hour)
+            // Generate access token (15 minutes)
             let expiration = std::time::SystemTime::now()
                 .duration_since(std::time::UNIX_EPOCH)
                 .unwrap()
                 .as_secs() as usize
-                + 3600; // 1 hour
+                + 900; // 15 minutes
 
             let claims = Claims {
                 sub: user.username.clone(),
@@ -126,12 +126,12 @@ pub async fn login(
                 StatusCode::INTERNAL_SERVER_ERROR
             })?;
 
-            // Generate refresh token (7 days)
+            // Generate refresh token (1 day)
             let refresh_token_str = generate_refresh_token();
             let token_hash = hash_token(&refresh_token_str);
             
             let refresh_expires_at = chrono::Utc::now().naive_utc() 
-                + chrono::Duration::days(7);
+                + chrono::Duration::days(1);
 
             let refresh_token_model = refresh_token::ActiveModel {
                 user_id: Set(user.id),
@@ -151,7 +151,7 @@ pub async fn login(
             return Ok(Json(LoginResponse { 
                 access_token,
                 refresh_token: refresh_token_str,
-                expires_in: 3600,
+                expires_in: 900,
             }));
         } else {
             println!("Password verification failed");
@@ -161,6 +161,11 @@ pub async fn login(
     }
 
     Err(StatusCode::UNAUTHORIZED)
+}
+
+#[derive(Serialize)]
+pub struct ErrorResponse {
+    error: String,
 }
 
 pub async fn refresh(
@@ -178,21 +183,27 @@ pub async fn refresh(
         .await
         .map_err(|e| {
             println!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse {
+                error: "Internal server error".to_string()
+            }))
         })?;
 
     if let Some(token) = refresh_token {
         // Check if token is revoked
         if token.revoked {
             println!("Token is revoked");
-            return Err(StatusCode::UNAUTHORIZED);
+            return Err((StatusCode::UNAUTHORIZED, Json(ErrorResponse {
+                error: "User logged out. Please re-login.".to_string()
+            })));
         }
 
         // Check if token is expired
         let now = chrono::Utc::now().naive_utc();
         if token.expires_at < now {
             println!("Token is expired");
-            return Err(StatusCode::UNAUTHORIZED);
+            return Err((StatusCode::UNAUTHORIZED, Json(ErrorResponse {
+                error: "Refresh token expired. Please re-login.".to_string()
+            })));
         }
 
         // Get user details
@@ -201,16 +212,20 @@ pub async fn refresh(
             .await
             .map_err(|e| {
                 println!("User lookup error: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
+                (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse {
+                    error: "Internal server error".to_string()
+                }))
             })?
-            .ok_or(StatusCode::UNAUTHORIZED)?;
+            .ok_or((StatusCode::UNAUTHORIZED, Json(ErrorResponse {
+                error: "User not found. Please re-login.".to_string()
+            })))?;
 
         // Generate new access token
         let expiration = std::time::SystemTime::now()
             .duration_since(std::time::UNIX_EPOCH)
             .unwrap()
             .as_secs() as usize
-            + 3600; // 1 hour
+            + 900; // 15 minutes
 
         let claims = Claims {
             sub: user.username,
@@ -225,7 +240,9 @@ pub async fn refresh(
         )
         .map_err(|e| {
             println!("Token Encode Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(ErrorResponse {
+                error: "Failed to generate token".to_string()
+            }))
         })?;
 
         println!("New access token generated");
@@ -233,7 +250,9 @@ pub async fn refresh(
     }
 
     println!("Invalid refresh token");
-    Err(StatusCode::UNAUTHORIZED)
+    Err((StatusCode::UNAUTHORIZED, Json(ErrorResponse {
+        error: "Invalid refresh token. Please re-login.".to_string()
+    })))
 }
 
 pub async fn logout(
@@ -271,4 +290,45 @@ pub async fn logout(
 
     println!("Token not found");
     Err(StatusCode::NOT_FOUND)
+}
+
+#[derive(Serialize)]
+pub struct UserProfile {
+    id: i32,
+    username: String,
+    role: user::Role,
+    created_at: chrono::NaiveDateTime,
+}
+
+pub async fn me(
+    State(db): State<DatabaseConnection>,
+    auth_user: axum::Extension<crate::middleware::auth::AuthUser>,
+) -> impl IntoResponse {
+    println!("/auth/me request for: {}", auth_user.username);
+    
+    // Find user in database
+    let user = User::find()
+        .filter(user::Column::Username.eq(&auth_user.username))
+        .one(&db)
+        .await
+        .map_err(|e| {
+            eprintln!("DB Error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    match user {
+        Some(user) => {
+            let profile = UserProfile {
+                id: user.id,
+                username: user.username,
+                role: user.role,
+                created_at: user.created_at,
+            };
+            Ok(Json(profile))
+        }
+        None => {
+            eprintln!("User not found in database: {}", auth_user.username);
+            Err(StatusCode::UNAUTHORIZED)
+        }
+    }
 }
