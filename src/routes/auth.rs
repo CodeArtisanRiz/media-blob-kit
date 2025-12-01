@@ -1,0 +1,274 @@
+use axum::{
+    extract::State,
+    http::StatusCode,
+    response::{IntoResponse, Json},
+};
+use sea_orm::{DatabaseConnection, EntityTrait, QueryFilter, ColumnTrait, ActiveModelTrait, Set};
+use serde::{Deserialize, Serialize};
+use argon2::{
+    password_hash::{PasswordHash, PasswordVerifier},
+    Argon2,
+};
+use jsonwebtoken::{encode, EncodingKey, Header};
+use crate::entities::{user::{self, Entity as User}, refresh_token::{self, Entity as RefreshToken}};
+use sha2::{Sha256, Digest};
+use base64::{Engine as _, engine::general_purpose};
+use rand::Rng;
+use std::env;
+
+#[derive(Deserialize)]
+pub struct LoginRequest {
+    username: String,
+    password: String,
+}
+
+#[derive(Serialize)]
+pub struct LoginResponse {
+    access_token: String,
+    refresh_token: String,
+    expires_in: usize,
+}
+
+#[derive(Deserialize)]
+pub struct RefreshRequest {
+    refresh_token: String,
+}
+
+#[derive(Serialize)]
+pub struct RefreshResponse {
+    access_token: String,
+}
+
+#[derive(Deserialize)]
+pub struct LogoutRequest {
+    refresh_token: String,
+}
+
+#[derive(Serialize)]
+pub struct LogoutResponse {
+    message: String,
+}
+
+#[derive(Serialize, Deserialize)]
+struct Claims {
+    sub: String,
+    exp: usize,
+    role: user::Role,
+}
+
+fn get_jwt_secret() -> String {
+    env::var("JWT_SECRET").unwrap_or_else(|_| {
+        eprintln!("WARNING: JWT_SECRET not set in .env, using default (insecure!)");
+        "secret".to_string()
+    })
+}
+
+fn generate_refresh_token() -> String {
+    let mut random_bytes = [0u8; 32];
+    rand::thread_rng().fill(&mut random_bytes);
+    general_purpose::STANDARD.encode(random_bytes)
+}
+
+fn hash_token(token: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(token.as_bytes());
+    format!("{:x}", hasher.finalize())
+}
+
+pub async fn login(
+    State(db): State<DatabaseConnection>,
+    Json(payload): Json<LoginRequest>,
+) -> impl IntoResponse {
+    println!("Login attempt for: {}", payload.username);
+    let user = User::find()
+        .filter(user::Column::Username.eq(&payload.username))
+        .one(&db)
+        .await
+        .map_err(|e| {
+            println!("DB Error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    if let Some(user) = user {
+        println!("User found: {}", user.username);
+        let parsed_hash = PasswordHash::new(&user.password)
+            .map_err(|e| {
+                println!("Hash Parse Error: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+        
+        if Argon2::default()
+            .verify_password(payload.password.as_bytes(), &parsed_hash)
+            .is_ok()
+        {
+            println!("Password verified");
+            
+            // Generate access token (1 hour)
+            let expiration = std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_secs() as usize
+                + 3600; // 1 hour
+
+            let claims = Claims {
+                sub: user.username.clone(),
+                exp: expiration,
+                role: user.role.clone(),
+            };
+
+            let access_token = encode(
+                &Header::default(),
+                &claims,
+                &EncodingKey::from_secret(get_jwt_secret().as_ref()),
+            )
+            .map_err(|e| {
+                println!("Token Encode Error: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+            // Generate refresh token (7 days)
+            let refresh_token_str = generate_refresh_token();
+            let token_hash = hash_token(&refresh_token_str);
+            
+            let refresh_expires_at = chrono::Utc::now().naive_utc() 
+                + chrono::Duration::days(7);
+
+            let refresh_token_model = refresh_token::ActiveModel {
+                user_id: Set(user.id),
+                token_hash: Set(token_hash),
+                expires_at: Set(refresh_expires_at),
+                created_at: Set(chrono::Utc::now().naive_utc()),
+                revoked: Set(false),
+                ..Default::default()
+            };
+
+            refresh_token_model.insert(&db).await.map_err(|e| {
+                println!("Refresh Token DB Error: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?;
+
+            println!("Tokens generated successfully");
+            return Ok(Json(LoginResponse { 
+                access_token,
+                refresh_token: refresh_token_str,
+                expires_in: 3600,
+            }));
+        } else {
+            println!("Password verification failed");
+        }
+    } else {
+        println!("User not found");
+    }
+
+    Err(StatusCode::UNAUTHORIZED)
+}
+
+pub async fn refresh(
+    State(db): State<DatabaseConnection>,
+    Json(payload): Json<RefreshRequest>,
+) -> impl IntoResponse {
+    println!("Refresh token request");
+    
+    let token_hash = hash_token(&payload.refresh_token);
+    
+    // Find refresh token in database
+    let refresh_token = RefreshToken::find()
+        .filter(refresh_token::Column::TokenHash.eq(&token_hash))
+        .one(&db)
+        .await
+        .map_err(|e| {
+            println!("DB Error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    if let Some(token) = refresh_token {
+        // Check if token is revoked
+        if token.revoked {
+            println!("Token is revoked");
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+
+        // Check if token is expired
+        let now = chrono::Utc::now().naive_utc();
+        if token.expires_at < now {
+            println!("Token is expired");
+            return Err(StatusCode::UNAUTHORIZED);
+        }
+
+        // Get user details
+        let user = User::find_by_id(token.user_id)
+            .one(&db)
+            .await
+            .map_err(|e| {
+                println!("User lookup error: {}", e);
+                StatusCode::INTERNAL_SERVER_ERROR
+            })?
+            .ok_or(StatusCode::UNAUTHORIZED)?;
+
+        // Generate new access token
+        let expiration = std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .unwrap()
+            .as_secs() as usize
+            + 3600; // 1 hour
+
+        let claims = Claims {
+            sub: user.username,
+            exp: expiration,
+            role: user.role,
+        };
+
+        let access_token = encode(
+            &Header::default(),
+            &claims,
+            &EncodingKey::from_secret(get_jwt_secret().as_ref()),
+        )
+        .map_err(|e| {
+            println!("Token Encode Error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+        println!("New access token generated");
+        return Ok(Json(RefreshResponse { access_token }));
+    }
+
+    println!("Invalid refresh token");
+    Err(StatusCode::UNAUTHORIZED)
+}
+
+pub async fn logout(
+    State(db): State<DatabaseConnection>,
+    Json(payload): Json<LogoutRequest>,
+) -> impl IntoResponse {
+    println!("Logout request");
+    
+    let token_hash = hash_token(&payload.refresh_token);
+    
+    // Find and revoke refresh token
+    let refresh_token = RefreshToken::find()
+        .filter(refresh_token::Column::TokenHash.eq(&token_hash))
+        .one(&db)
+        .await
+        .map_err(|e| {
+            println!("DB Error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    if let Some(token) = refresh_token {
+        let mut active_token: refresh_token::ActiveModel = token.into();
+        active_token.revoked = Set(true);
+        
+        active_token.update(&db).await.map_err(|e| {
+            println!("Update Error: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+        println!("Refresh token revoked");
+        return Ok(Json(LogoutResponse {
+            message: "Logged out successfully".to_string(),
+        }));
+    }
+
+    println!("Token not found");
+    Err(StatusCode::NOT_FOUND)
+}

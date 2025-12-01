@@ -1,0 +1,2 @@
+[alias]
+cusr = "run -- create-user"
