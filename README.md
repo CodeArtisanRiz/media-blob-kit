@@ -111,6 +111,23 @@ media-blob-kit/
 - `GET /users` - List users (su-only)
 - `DELETE /users/{id}` - Delete user (su-only)
 
+### API Documentation
+
+**Interactive Swagger UI** is available at: **`http://localhost:3000/swagger-ui`**
+
+The Swagger UI provides:
+- Complete API endpoint documentation with request/response schemas
+- Interactive testing interface - try out API calls directly from your browser
+- JWT Bearer token authentication support
+- Organized endpoints by tags (General, Authentication, User Management)
+
+To test authenticated endpoints:
+1. First login via `POST /auth/login` to obtain an access token
+2. Click the "Authorize" button at the top of the Swagger UI
+3. Enter your access token in the format: `Bearer <your_access_token>`
+4. Now you can test protected endpoints like `/auth/me` and `/users`
+
+
 ### Role-Based System
 - su (superuser): CLI-only creation, full user management access
 - admin: Project and file management (Phase 3)
@@ -177,6 +194,11 @@ The [`IMPLEMENTATION.md`](IMPLEMENTATION.md) file outlines a comprehensive 7-pha
 - ⏳ Pending: Scheduled cleanup jobs
 - ⏳ Pending: Orphaned S3 object cleanup
 - ⏳ Pending: API key generation for programmatic uploads
+
+**Phase 8: API Documentation**
+- ✅ Completed: OpenAPI Integration
+- ✅ Completed: Endpoint Documentation
+- ✅ Completed: Swagger UI
 
 See [`IMPLEMENTATION.md`](IMPLEMENTATION.md) for detailed task breakdowns.
 

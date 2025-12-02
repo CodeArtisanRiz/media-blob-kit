@@ -12,16 +12,16 @@ use argon2::{
 use crate::entities::user::{self, Entity as User};
 use crate::middleware::auth::AuthUser;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct CreateUserRequest {
     username: String,
     password: String,
     role: UserRole,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 #[serde(rename_all = "lowercase")]
-enum UserRole {
+pub enum UserRole {
     Admin,
     User,
 }
@@ -35,7 +35,7 @@ impl From<UserRole> for user::Role {
     }
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct UserResponse {
     id: i32,
     username: String,
@@ -54,9 +54,23 @@ impl From<user::Model> for UserResponse {
     }
 }
 
+#[utoipa::path(
+    post,
+    path = "/users",
+    request_body = CreateUserRequest,
+    responses(
+        (status = 201, description = "User created successfully", body = UserResponse),
+        (status = 409, description = "Username already exists"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "User Management"
+)]
 pub async fn create_user(
     State(db): State<DatabaseConnection>,
-    _auth_user: axum::Extension<AuthUser>,
+    axum::Extension(_auth_user): axum::Extension<AuthUser>,
     Json(payload): Json<CreateUserRequest>,
 ) -> impl IntoResponse {
     println!("Create user request for: {}", payload.username);
@@ -68,7 +82,10 @@ pub async fn create_user(
         .hash_password(payload.password.as_bytes(), &salt)
         .map_err(|e| {
             eprintln!("Password hash error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
+            (
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal server error" })),
+            )
         })?
         .to_string();
 
@@ -88,11 +105,32 @@ pub async fn create_user(
         }
         Err(e) => {
             eprintln!("Failed to create user: {}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
+            if e.to_string().contains("duplicate key value violates unique constraint") {
+                return Err((
+                    StatusCode::CONFLICT,
+                    Json(serde_json::json!({ "error": "Username already exists" })),
+                ));
+            }
+            Err((
+                StatusCode::INTERNAL_SERVER_ERROR,
+                Json(serde_json::json!({ "error": "Internal server error" })),
+            ))
         }
     }
 }
 
+#[utoipa::path(
+    get,
+    path = "/users",
+    responses(
+        (status = 200, description = "List of all users", body = [UserResponse]),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "User Management"
+)]
 pub async fn list_users(
     State(db): State<DatabaseConnection>,
     _auth_user: axum::Extension<AuthUser>,
@@ -111,6 +149,23 @@ pub async fn list_users(
     }
 }
 
+#[utoipa::path(
+    delete,
+    path = "/users/{id}",
+    params(
+        ("id" = i32, Path, description = "User ID to delete")
+    ),
+    responses(
+        (status = 200, description = "User deleted successfully"),
+        (status = 400, description = "Cannot delete yourself"),
+        (status = 404, description = "User not found"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "User Management"
+)]
 pub async fn delete_user(
     State(db): State<DatabaseConnection>,
     auth_user: axum::Extension<AuthUser>,

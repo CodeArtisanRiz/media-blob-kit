@@ -13,7 +13,7 @@ pub struct Model {
     pub created_at: DateTime,
 }
 
-#[derive(EnumIter, DeriveActiveEnum, Clone, Debug, PartialEq, Eq, Deserialize, Serialize)]
+#[derive(EnumIter, DeriveActiveEnum, Clone, Debug, PartialEq, Eq, Deserialize, Serialize, utoipa::ToSchema)]
 #[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
 pub enum Role {
     #[sea_orm(string_value = "su")]

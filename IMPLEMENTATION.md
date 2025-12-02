@@ -102,3 +102,19 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [ ] Scheduled job to clean orphaned S3 objects.
 - [ ] **API Keys**
     - [ ] Allow generating API keys for projects to enable programmatic uploads.
+
+## Phase 8: API Documentation
+**Goal**: Provide interactive API documentation via Swagger/OpenAPI.
+
+- [x] **OpenAPI Integration**
+    - [x] Add `utoipa`, `utoipa-axum`, and `utoipa-swagger-ui` dependencies.
+    - [x] Configure OpenAPI specification with API metadata.
+    - [x] Define JWT Bearer security scheme.
+- [x] **Endpoint Documentation**
+    - [x] Document all authentication endpoints (`/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/me`).
+    - [x] Document all user management endpoints (`/users`).
+    - [x] Add request/response schema annotations.
+- [x] **Swagger UI**
+    - [x] Setup Swagger UI at `/swagger-ui`.
+    - [x] Configure interactive API testing interface.
+    - [x] Update README with Swagger UI access instructions.

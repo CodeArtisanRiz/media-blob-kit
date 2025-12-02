@@ -16,35 +16,35 @@ use base64::{Engine as _, engine::general_purpose};
 use rand::Rng;
 use std::env;
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct LoginRequest {
     username: String,
     password: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct LoginResponse {
     access_token: String,
     refresh_token: String,
     expires_in: usize,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct RefreshRequest {
     refresh_token: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct RefreshResponse {
     access_token: String,
 }
 
-#[derive(Deserialize)]
+#[derive(Deserialize, utoipa::ToSchema)]
 pub struct LogoutRequest {
     refresh_token: String,
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct LogoutResponse {
     message: String,
 }
@@ -75,6 +75,16 @@ fn hash_token(token: &str) -> String {
     format!("{:x}", hasher.finalize())
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/login",
+    request_body = LoginRequest,
+    responses(
+        (status = 200, description = "Login successful", body = LoginResponse),
+        (status = 401, description = "Invalid credentials")
+    ),
+    tag = "Authentication"
+)]
 pub async fn login(
     State(db): State<DatabaseConnection>,
     Json(payload): Json<LoginRequest>,
@@ -163,11 +173,21 @@ pub async fn login(
     Err(StatusCode::UNAUTHORIZED)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct ErrorResponse {
     error: String,
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/refresh",
+    request_body = RefreshRequest,
+    responses(
+        (status = 200, description = "Token refreshed successfully", body = RefreshResponse),
+        (status = 401, description = "Invalid or expired refresh token", body = ErrorResponse)
+    ),
+    tag = "Authentication"
+)]
 pub async fn refresh(
     State(db): State<DatabaseConnection>,
     Json(payload): Json<RefreshRequest>,
@@ -255,6 +275,16 @@ pub async fn refresh(
     })))
 }
 
+#[utoipa::path(
+    post,
+    path = "/auth/logout",
+    request_body = LogoutRequest,
+    responses(
+        (status = 200, description = "Logged out successfully", body = LogoutResponse),
+        (status = 404, description = "Refresh token not found")
+    ),
+    tag = "Authentication"
+)]
 pub async fn logout(
     State(db): State<DatabaseConnection>,
     Json(payload): Json<LogoutRequest>,
@@ -292,7 +322,7 @@ pub async fn logout(
     Err(StatusCode::NOT_FOUND)
 }
 
-#[derive(Serialize)]
+#[derive(Serialize, utoipa::ToSchema)]
 pub struct UserProfile {
     id: i32,
     username: String,
@@ -300,6 +330,18 @@ pub struct UserProfile {
     created_at: chrono::NaiveDateTime,
 }
 
+#[utoipa::path(
+    get,
+    path = "/auth/me",
+    responses(
+        (status = 200, description = "User profile retrieved successfully", body = UserProfile),
+        (status = 401, description = "Unauthorized - Invalid or missing token")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "Authentication"
+)]
 pub async fn me(
     State(db): State<DatabaseConnection>,
     auth_user: axum::Extension<crate::middleware::auth::AuthUser>,
