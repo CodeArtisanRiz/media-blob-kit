@@ -1,6 +1,8 @@
 mod home;
 mod auth;
 mod users;
+mod projects;
+mod api_keys;
 
 use axum::{
     routing::{get, post, delete},
@@ -28,6 +30,17 @@ use utoipa_swagger_ui::SwaggerUi;
         users::create_user,
         users::list_users,
         users::delete_user,
+        // Project management endpoints
+        projects::create_project,
+        projects::list_projects,
+        projects::get_project,
+        projects::update_project,
+        projects::delete_project,
+        // API Key endpoints
+        api_keys::create_api_key,
+        api_keys::list_api_keys,
+        api_keys::update_api_key,
+        api_keys::delete_api_key,
     ),
     components(
         schemas(
@@ -47,12 +60,22 @@ use utoipa_swagger_ui::SwaggerUi;
             users::UserResponse,
             users::UserRole,
             crate::entities::user::Role,
+            // Project schemas
+            projects::CreateProjectRequest,
+            projects::UpdateProjectRequest,
+            projects::ProjectResponse,
+            // API Key schemas
+            api_keys::CreateApiKeyRequest,
+            api_keys::UpdateApiKeyRequest,
+            api_keys::ApiKeyResponse,
         )
     ),
     tags(
         (name = "General", description = "General API information"),
         (name = "Authentication", description = "Authentication endpoints for login, token refresh, and logout"),
-        (name = "User Management", description = "User management endpoints (superuser access required)")
+        (name = "User Management", description = "User management endpoints (superuser access required)"),
+        (name = "Project Management", description = "Project management endpoints"),
+        (name = "Project API Keys", description = "API Key management endpoints")
     ),
     info(
         title = "MediaBlobKit API",
@@ -89,6 +112,15 @@ pub fn create_routes(db: DatabaseConnection) -> Router {
     // Protected routes that require auth
     let protected_routes = Router::new()
         .route("/auth/me", get(auth::me))
+        .route("/projects", post(projects::create_project))
+        .route("/projects", get(projects::list_projects))
+        .route("/projects/{id}", get(projects::get_project))
+        .route("/projects/{id}", axum::routing::put(projects::update_project))
+        .route("/projects/{id}", delete(projects::delete_project))
+        .route("/projects/{id}/keys", post(api_keys::create_api_key))
+        .route("/projects/{id}/keys", get(api_keys::list_api_keys))
+        .route("/projects/{id}/keys/{key_id}", axum::routing::patch(api_keys::update_api_key))
+        .route("/projects/{id}/keys/{key_id}", delete(api_keys::delete_api_key))
         .layer(middleware::from_fn(auth_middleware));
 
     // Su-only routes

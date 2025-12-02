@@ -3,31 +3,27 @@ use serde::{Deserialize, Serialize};
 use uuid::Uuid;
 
 #[derive(Clone, Debug, PartialEq, DeriveEntityModel, Deserialize, Serialize)]
-#[sea_orm(table_name = "users")]
+#[sea_orm(table_name = "api_keys")]
 pub struct Model {
     #[sea_orm(primary_key, auto_increment = false)]
     pub id: Uuid,
+    pub project_id: Uuid,
+    pub name: String,
     #[sea_orm(unique)]
-    pub username: String,
-    pub password: String,
-    pub role: Role,
+    pub key_hash: String,
     pub created_at: DateTime,
-}
-
-#[derive(EnumIter, DeriveActiveEnum, Clone, Debug, PartialEq, Eq, Deserialize, Serialize, utoipa::ToSchema)]
-#[sea_orm(rs_type = "String", db_type = "String(StringLen::None)")]
-pub enum Role {
-    #[sea_orm(string_value = "su")]
-    Su,
-    #[sea_orm(string_value = "admin")]
-    Admin,
-    #[sea_orm(string_value = "user")]
-    User,
+    pub expires_at: Option<DateTime>,
+    pub is_active: bool,
 }
 
 #[derive(Copy, Clone, Debug, EnumIter, DeriveRelation)]
 pub enum Relation {
-    #[sea_orm(has_many = "super::project::Entity")]
+    #[sea_orm(
+        belongs_to = "super::project::Entity",
+        from = "Column::ProjectId",
+        to = "super::project::Column::Id",
+        on_delete = "Cascade"
+    )]
     Project,
 }
 

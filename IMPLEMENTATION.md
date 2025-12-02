@@ -46,14 +46,19 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
 ## Phase 3: Project Management
 **Goal**: Allow users to create and manage projects with specific settings.
 
-- [ ] **Project Models & Migrations**
-    - [ ] Create migration for `projects` table (id, owner_id, name, settings_json, etc.).
-- [ ] **Project API**
-    - [ ] `POST /projects`: Create a new project.
-    - [ ] `GET /projects`: List user's projects.
-    - [ ] `GET /projects/:id`: Get project details.
-    - [ ] `PUT /projects/:id`: Update project settings (image variants, quotas).
-    - [ ] `DELETE /projects/:id`: Soft delete project.
+- [x] **Project Models & Migrations**
+    - [x] Create migration for `projects` table (id, owner_id, name, settings_json, etc.).
+- [x] **Project API**
+    - [x] `POST /projects`: Create a new project.
+    - [x] `GET /projects`: List user's projects.
+    - [x] `GET /projects/:id`: Get project details.
+    - [x] `PUT /projects/:id`: Update project settings (image variants, quotas).
+    - [x] `DELETE /projects/:id`: Soft delete project.
+- [x] **Project API Keys**
+    - [x] `POST /projects/:id/keys`: Create a new API key for the project.
+    - [x] `GET /projects/:id/keys`: List API keys for the project.
+    - [x] `PATCH /projects/:id/keys/:key_id`: Enable/Disable an API key.
+    - [x] `DELETE /projects/:id/keys/:key_id`: Permanently delete an API key.
 
 ## Phase 4: File Upload & S3 Integration
 **Goal**: Implement generic file uploads to S3.
@@ -100,8 +105,6 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
 - [ ] **Cleanup Jobs**
     - [ ] Scheduled job to remove "soft deleted" items after X days.
     - [ ] Scheduled job to clean orphaned S3 objects.
-- [ ] **API Keys**
-    - [ ] Allow generating API keys for projects to enable programmatic uploads.
 
 ## Phase 8: API Documentation
 **Goal**: Provide interactive API documentation via Swagger/OpenAPI.
