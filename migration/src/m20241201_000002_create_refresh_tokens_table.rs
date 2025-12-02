@@ -13,12 +13,11 @@ impl MigrationTrait for Migration {
                     .if_not_exists()
                     .col(
                         ColumnDef::new(RefreshToken::Id)
-                            .integer()
+                            .uuid()
                             .not_null()
-                            .auto_increment()
                             .primary_key(),
                     )
-                    .col(ColumnDef::new(RefreshToken::UserId).integer().not_null())
+                    .col(ColumnDef::new(RefreshToken::UserId).uuid().not_null())
                     .col(ColumnDef::new(RefreshToken::TokenHash).string().not_null().unique_key())
                     .col(ColumnDef::new(RefreshToken::ExpiresAt).timestamp().not_null())
                     .col(ColumnDef::new(RefreshToken::CreatedAt).timestamp().not_null())

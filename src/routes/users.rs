@@ -11,6 +11,7 @@ use argon2::{
 };
 use crate::entities::user::{self, Entity as User};
 use crate::middleware::auth::AuthUser;
+use uuid::Uuid;
 
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct CreateUserRequest {
@@ -37,7 +38,8 @@ impl From<UserRole> for user::Role {
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct UserResponse {
-    id: i32,
+    #[schema(value_type = String)]
+    id: Uuid,
     username: String,
     role: user::Role,
     created_at: chrono::NaiveDateTime,
@@ -91,6 +93,7 @@ pub async fn create_user(
 
     // Create user
     let user = user::ActiveModel {
+        id: Set(Uuid::new_v4()),
         username: Set(payload.username),
         password: Set(password_hash),
         role: Set(payload.role.into()),
@@ -153,7 +156,7 @@ pub async fn list_users(
     delete,
     path = "/users/{id}",
     params(
-        ("id" = i32, Path, description = "User ID to delete")
+        ("id" = String, Path, description = "User ID to delete")
     ),
     responses(
         (status = 200, description = "User deleted successfully"),
@@ -169,7 +172,7 @@ pub async fn list_users(
 pub async fn delete_user(
     State(db): State<DatabaseConnection>,
     auth_user: axum::Extension<AuthUser>,
-    Path(user_id): Path<i32>,
+    Path(user_id): Path<Uuid>,
 ) -> impl IntoResponse {
     println!("Delete user request for ID: {}", user_id);
 

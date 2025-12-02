@@ -12,6 +12,7 @@ use migration::{Migrator, MigratorTrait};
 use routes::create_routes;
 use sea_orm::{ActiveModelTrait, Database, Set};
 use std::env;
+use uuid::Uuid;
 
 #[derive(Parser)]
 #[command(author, version, about, long_about = None)]
@@ -63,6 +64,7 @@ async fn main() {
                 .to_string();
 
             let user = user::ActiveModel {
+                id: Set(Uuid::new_v4()),
                 username: Set(username.clone()),
                 password: Set(password_hash),
                 role: Set(user::Role::Su),

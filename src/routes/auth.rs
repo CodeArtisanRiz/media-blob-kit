@@ -15,6 +15,7 @@ use sha2::{Sha256, Digest};
 use base64::{Engine as _, engine::general_purpose};
 use rand::Rng;
 use std::env;
+use uuid::Uuid;
 
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct LoginRequest {
@@ -144,6 +145,7 @@ pub async fn login(
                 + chrono::Duration::days(1);
 
             let refresh_token_model = refresh_token::ActiveModel {
+                id: Set(Uuid::new_v4()),
                 user_id: Set(user.id),
                 token_hash: Set(token_hash),
                 expires_at: Set(refresh_expires_at),
@@ -324,7 +326,8 @@ pub async fn logout(
 
 #[derive(Serialize, utoipa::ToSchema)]
 pub struct UserProfile {
-    id: i32,
+    #[schema(value_type = String)]
+    id: Uuid,
     username: String,
     role: user::Role,
     created_at: chrono::NaiveDateTime,

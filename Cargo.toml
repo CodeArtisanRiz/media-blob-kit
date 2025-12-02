@@ -25,6 +25,7 @@ tower-http = { version = "0.6", features = ["trace"] }
 utoipa = { version = "5.3.1", features = ["axum_extras", "chrono"] }
 utoipa-axum = "0.2.0"
 utoipa-swagger-ui = { version = "9.0.2", features = ["axum"] }
+uuid = { version = "1.19.0", features = ["v4", "serde", "fast-rng"] }
 
 [workspace]
 members = [".", "migration"]

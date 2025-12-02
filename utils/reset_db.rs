@@ -18,6 +18,12 @@ async fn main() {
     .unwrap();
     db.execute(Statement::from_string(
         DbBackend::Postgres,
+        "DROP TABLE IF EXISTS \"refresh_tokens\" CASCADE;".to_owned(),
+    ))
+    .await
+    .unwrap();
+    db.execute(Statement::from_string(
+        DbBackend::Postgres,
         "DROP TABLE IF EXISTS \"users\" CASCADE;".to_owned(),
     ))
     .await
