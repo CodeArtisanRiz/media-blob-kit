@@ -6,11 +6,13 @@ use axum::{
 };
 use jsonwebtoken::{decode, DecodingKey, Validation};
 use serde::{Deserialize, Serialize};
-use std::env;
+use crate::config::get_config;
+use uuid::Uuid;
 use crate::entities::user;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct AuthUser {
+    pub id: Uuid,
     pub username: String,
     pub role: user::Role,
 }
@@ -20,10 +22,7 @@ struct Claims {
     sub: String,
     exp: usize,
     role: user::Role,
-}
-
-fn get_jwt_secret() -> String {
-    env::var("JWT_SECRET").unwrap_or_else(|_| "secret".to_string())
+    user_id: Uuid,
 }
 
 pub async fn auth_middleware(
@@ -47,7 +46,7 @@ pub async fn auth_middleware(
     // Decode and validate JWT
     let token_data = decode::<Claims>(
         token,
-        &DecodingKey::from_secret(get_jwt_secret().as_ref()),
+        &DecodingKey::from_secret(get_config().jwt_secret.as_ref()),
         &Validation::default(),
     )
     .map_err(|e| {
@@ -57,6 +56,7 @@ pub async fn auth_middleware(
 
     // Create AuthUser from claims
     let auth_user = AuthUser {
+        id: token_data.claims.user_id,
         username: token_data.claims.sub,
         role: token_data.claims.role,
     };

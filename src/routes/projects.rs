@@ -1,11 +1,11 @@
 use axum::{
     extract::{Path, State},
     http::StatusCode,
-    response::{IntoResponse, Json},
+    response::Json,
 };
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter,
-    Set,
+    Set, QuerySelect,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
@@ -13,6 +13,9 @@ use uuid::Uuid;
 
 use crate::entities::project::{self, Entity as Project};
 use crate::middleware::auth::AuthUser;
+use crate::error::AppError;
+use crate::pagination::Pagination;
+use axum::extract::Query;
 
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct CreateProjectRequest {
@@ -72,29 +75,12 @@ pub async fn create_project(
     State(db): State<DatabaseConnection>,
     auth_user: axum::Extension<AuthUser>,
     Json(payload): Json<CreateProjectRequest>,
-) -> impl IntoResponse {
+) -> Result<(StatusCode, Json<ProjectResponse>), AppError> {
     println!("Create project request for user: {}", auth_user.username);
-
-    // Get user ID (we need to fetch the user first to get the UUID)
-    // Optimization: We could store UUID in AuthUser if we change the middleware, 
-    // but for now we'll fetch it or assume we can get it. 
-    // Wait, AuthUser only has username and role. We need to fetch the user to get the ID.
-    // Or we can update AuthUser to include ID. 
-    // For now, let's fetch the user by username.
-    
-    let user = crate::entities::user::Entity::find()
-        .filter(crate::entities::user::Column::Username.eq(&auth_user.username))
-        .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
 
     let project = project::ActiveModel {
         id: Set(Uuid::new_v4()),
-        owner_id: Set(user.id),
+        owner_id: Set(auth_user.id),
         name: Set(payload.name),
         description: Set(payload.description),
         settings: Set(payload.settings.unwrap_or(serde_json::json!({}))),
@@ -103,21 +89,18 @@ pub async fn create_project(
         ..Default::default()
     };
 
-    match project.insert(&db).await {
-        Ok(created_project) => {
-            println!("Project '{}' created successfully", created_project.name);
-            Ok((StatusCode::CREATED, Json(ProjectResponse::from(created_project))))
-        }
-        Err(e) => {
-            eprintln!("Failed to create project: {}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
-        }
-    }
+    let created_project = project.insert(&db).await?;
+
+    println!("Project '{}' created successfully", created_project.name);
+    Ok((StatusCode::CREATED, Json(ProjectResponse::from(created_project))))
 }
 
 #[utoipa::path(
     get,
     path = "/projects",
+    params(
+        Pagination
+    ),
     responses(
         (status = 200, description = "List of user's projects", body = [ProjectResponse]),
         (status = 500, description = "Internal server error")
@@ -130,29 +113,18 @@ pub async fn create_project(
 pub async fn list_projects(
     State(db): State<DatabaseConnection>,
     auth_user: axum::Extension<AuthUser>,
-) -> Result<Json<Vec<ProjectResponse>>, StatusCode> {
+    Query(pagination): Query<Pagination>,
+) -> Result<Json<Vec<ProjectResponse>>, AppError> {
     println!("List projects request for user: {}", auth_user.username);
-
-    let user = crate::entities::user::Entity::find()
-        .filter(crate::entities::user::Column::Username.eq(&auth_user.username))
-        .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
 
     // Filter by owner_id and deleted_at is null
     let projects = Project::find()
-        .filter(project::Column::OwnerId.eq(user.id))
+        .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
+        .limit(pagination.limit())
+        .offset(pagination.offset())
         .all(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("Failed to list projects: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .await?;
 
     let responses: Vec<ProjectResponse> = projects.into_iter().map(ProjectResponse::from).collect();
     Ok(Json(responses))
@@ -178,33 +150,17 @@ pub async fn get_project(
     State(db): State<DatabaseConnection>,
     auth_user: axum::Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
-) -> impl IntoResponse {
+) -> Result<Json<ProjectResponse>, AppError> {
     println!("Get project request for ID: {}", project_id);
 
-    let user = crate::entities::user::Entity::find()
-        .filter(crate::entities::user::Column::Username.eq(&auth_user.username))
-        .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
     let project = Project::find_by_id(project_id)
-        .filter(project::Column::OwnerId.eq(user.id))
+        .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
         .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .await?
+        .ok_or(AppError::NotFound("Project not found".to_string()))?;
 
-    match project {
-        Some(project) => Ok(Json(ProjectResponse::from(project))),
-        None => Err(StatusCode::NOT_FOUND),
-    }
+    Ok(Json(ProjectResponse::from(project)))
 }
 
 #[utoipa::path(
@@ -229,54 +185,33 @@ pub async fn update_project(
     auth_user: axum::Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     Json(payload): Json<UpdateProjectRequest>,
-) -> impl IntoResponse {
+) -> Result<Json<ProjectResponse>, AppError> {
     println!("Update project request for ID: {}", project_id);
 
-    let user = crate::entities::user::Entity::find()
-        .filter(crate::entities::user::Column::Username.eq(&auth_user.username))
-        .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
     let project = Project::find_by_id(project_id)
-        .filter(project::Column::OwnerId.eq(user.id))
+        .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
         .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .await?
+        .ok_or(AppError::NotFound("Project not found".to_string()))?;
 
-    match project {
-        Some(project) => {
-            let mut active_project = project.into_active_model();
-            
-            if let Some(name) = payload.name {
-                active_project.name = Set(name);
-            }
-            if let Some(description) = payload.description {
-                active_project.description = Set(Some(description));
-            }
-            if let Some(settings) = payload.settings {
-                active_project.settings = Set(settings);
-            }
-            
-            active_project.updated_at = Set(chrono::Utc::now().naive_utc());
-
-            let updated_project = active_project.update(&db).await.map_err(|e| {
-                eprintln!("Update Error: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
-
-            Ok(Json(ProjectResponse::from(updated_project)))
-        }
-        None => Err(StatusCode::NOT_FOUND),
+    let mut active_project = project.into_active_model();
+    
+    if let Some(name) = payload.name {
+        active_project.name = Set(name);
     }
+    if let Some(description) = payload.description {
+        active_project.description = Set(Some(description));
+    }
+    if let Some(settings) = payload.settings {
+        active_project.settings = Set(settings);
+    }
+    
+    active_project.updated_at = Set(chrono::Utc::now().naive_utc());
+
+    let updated_project = active_project.update(&db).await?;
+
+    Ok(Json(ProjectResponse::from(updated_project)))
 }
 
 #[utoipa::path(
@@ -299,43 +234,22 @@ pub async fn delete_project(
     State(db): State<DatabaseConnection>,
     auth_user: axum::Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
-) -> impl IntoResponse {
+) -> Result<Json<serde_json::Value>, AppError> {
     println!("Delete project request for ID: {}", project_id);
 
-    let user = crate::entities::user::Entity::find()
-        .filter(crate::entities::user::Column::Username.eq(&auth_user.username))
-        .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
     let project = Project::find_by_id(project_id)
-        .filter(project::Column::OwnerId.eq(user.id))
+        .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
         .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .await?
+        .ok_or(AppError::NotFound("Project not found".to_string()))?;
 
-    match project {
-        Some(project) => {
-            let mut active_project = project.into_active_model();
-            active_project.deleted_at = Set(Some(chrono::Utc::now().naive_utc()));
-            
-            active_project.update(&db).await.map_err(|e| {
-                eprintln!("Delete Error: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
+    let mut active_project = project.into_active_model();
+    active_project.deleted_at = Set(Some(chrono::Utc::now().naive_utc()));
+    
+    active_project.update(&db).await?;
 
-            Ok(Json(serde_json::json!({
-                "message": "Project deleted successfully"
-            })))
-        }
-        None => Err(StatusCode::NOT_FOUND),
-    }
+    Ok(Json(serde_json::json!({
+        "message": "Project deleted successfully"
+    })))
 }

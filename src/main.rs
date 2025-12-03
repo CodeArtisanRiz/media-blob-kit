@@ -1,6 +1,9 @@
 mod entities;
 mod routes;
 mod middleware;
+pub mod config;
+mod error;
+mod pagination;
 
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
@@ -11,7 +14,6 @@ use entities::user;
 use migration::{Migrator, MigratorTrait};
 use routes::create_routes;
 use sea_orm::{ActiveModelTrait, Database, Set};
-use std::env;
 use uuid::Uuid;
 
 #[derive(Parser)]
@@ -37,9 +39,10 @@ enum Commands {
 #[tokio::main]
 async fn main() {
     dotenvy::dotenv().ok();
-    let database_url = env::var("DATABASE_URL").expect("DATABASE_URL must be set");
-
-    let db = Database::connect(database_url)
+    // Initialize config
+    let config = config::get_config();
+    
+    let db = Database::connect(&config.database_url)
         .await
         .expect("Failed to connect to database");
 

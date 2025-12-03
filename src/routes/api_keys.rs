@@ -1,11 +1,10 @@
 use axum::{
     extract::{Path, State},
-    http::StatusCode,
     response::Json,
 };
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter,
-    Set,
+    Set, QuerySelect,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -15,6 +14,9 @@ use base64::{Engine as _, engine::general_purpose};
 
 use crate::entities::{api_key, project};
 use crate::middleware::auth::AuthUser;
+use crate::error::AppError;
+use crate::pagination::Pagination;
+use axum::extract::Query;
 
 #[derive(Deserialize, utoipa::ToSchema)]
 pub struct CreateApiKeyRequest {
@@ -75,30 +77,16 @@ pub async fn create_api_key(
     auth_user: axum::Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     Json(payload): Json<CreateApiKeyRequest>,
-) -> Result<Json<ApiKeyResponse>, StatusCode> {
+) -> Result<Json<ApiKeyResponse>, AppError> {
     println!("Create API key request for project: {}", project_id);
 
     // Verify project ownership
-    let user = crate::entities::user::Entity::find()
-        .filter(crate::entities::user::Column::Username.eq(&auth_user.username))
-        .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
     let project = project::Entity::find_by_id(project_id)
-        .filter(project::Column::OwnerId.eq(user.id))
+        .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
         .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .await?
+        .ok_or(AppError::NotFound("Project not found".to_string()))?;
 
     // Generate API Key
     let mut key_bytes = [0u8; 32];
@@ -120,24 +108,19 @@ pub async fn create_api_key(
         is_active: Set(true),
     };
 
-    match api_key.insert(&db).await {
-        Ok(created_key) => {
-            let mut response = ApiKeyResponse::from(created_key);
-            response.key = Some(raw_key);
-            Ok(Json(response))
-        }
-        Err(e) => {
-            eprintln!("Failed to create API key: {}", e);
-            Err(StatusCode::INTERNAL_SERVER_ERROR)
-        }
-    }
+    let created_key = api_key.insert(&db).await?;
+
+    let mut response = ApiKeyResponse::from(created_key);
+    response.key = Some(raw_key);
+    Ok(Json(response))
 }
 
 #[utoipa::path(
     get,
     path = "/projects/{id}/keys",
     params(
-        ("id" = String, Path, description = "Project ID")
+        ("id" = String, Path, description = "Project ID"),
+        Pagination
     ),
     responses(
         (status = 200, description = "List of API Keys", body = [ApiKeyResponse]),
@@ -153,39 +136,24 @@ pub async fn list_api_keys(
     State(db): State<DatabaseConnection>,
     auth_user: axum::Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
-) -> Result<Json<Vec<ApiKeyResponse>>, StatusCode> {
+    Query(pagination): Query<Pagination>,
+) -> Result<Json<Vec<ApiKeyResponse>>, AppError> {
     println!("List API keys request for project: {}", project_id);
 
     // Verify project ownership
-    let user = crate::entities::user::Entity::find()
-        .filter(crate::entities::user::Column::Username.eq(&auth_user.username))
-        .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
     let project = project::Entity::find_by_id(project_id)
-        .filter(project::Column::OwnerId.eq(user.id))
+        .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
         .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .await?
+        .ok_or(AppError::NotFound("Project not found".to_string()))?;
 
     let keys = api_key::Entity::find()
         .filter(api_key::Column::ProjectId.eq(project.id))
+        .limit(pagination.limit())
+        .offset(pagination.offset())
         .all(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("Failed to list API keys: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+        .await?;
 
     let responses: Vec<ApiKeyResponse> = keys.into_iter().map(ApiKeyResponse::from).collect();
     Ok(Json(responses))
@@ -214,48 +182,27 @@ pub async fn update_api_key(
     auth_user: axum::Extension<AuthUser>,
     Path((project_id, key_id)): Path<(Uuid, Uuid)>,
     Json(payload): Json<UpdateApiKeyRequest>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, AppError> {
     println!("Update API key request for project: {}, key: {}", project_id, key_id);
 
     // Verify project ownership
-    let user = crate::entities::user::Entity::find()
-        .filter(crate::entities::user::Column::Username.eq(&auth_user.username))
-        .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
     let project = project::Entity::find_by_id(project_id)
-        .filter(project::Column::OwnerId.eq(user.id))
+        .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
         .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .await?
+        .ok_or(AppError::NotFound("Project not found".to_string()))?;
 
     let key = api_key::Entity::find_by_id(key_id)
         .filter(api_key::Column::ProjectId.eq(project.id))
         .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .await?
+        .ok_or(AppError::NotFound("API Key not found".to_string()))?;
 
     let mut active_key = key.into_active_model();
     active_key.is_active = Set(payload.is_active);
 
-    active_key.update(&db).await.map_err(|e| {
-        eprintln!("Failed to update API key: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    active_key.update(&db).await?;
 
     Ok(Json(serde_json::json!({
         "message": "API Key updated successfully"
@@ -283,45 +230,24 @@ pub async fn delete_api_key(
     State(db): State<DatabaseConnection>,
     auth_user: axum::Extension<AuthUser>,
     Path((project_id, key_id)): Path<(Uuid, Uuid)>,
-) -> Result<Json<serde_json::Value>, StatusCode> {
+) -> Result<Json<serde_json::Value>, AppError> {
     println!("Delete API key request for project: {}, key: {}", project_id, key_id);
 
     // Verify project ownership
-    let user = crate::entities::user::Entity::find()
-        .filter(crate::entities::user::Column::Username.eq(&auth_user.username))
-        .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::UNAUTHORIZED)?;
-
     let project = project::Entity::find_by_id(project_id)
-        .filter(project::Column::OwnerId.eq(user.id))
+        .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
         .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .await?
+        .ok_or(AppError::NotFound("Project not found".to_string()))?;
 
     let key = api_key::Entity::find_by_id(key_id)
         .filter(api_key::Column::ProjectId.eq(project.id))
         .one(&db)
-        .await
-        .map_err(|e| {
-            eprintln!("DB Error: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?
-        .ok_or(StatusCode::NOT_FOUND)?;
+        .await?
+        .ok_or(AppError::NotFound("API Key not found".to_string()))?;
 
-    api_key::Entity::delete(key.into_active_model()).exec(&db).await.map_err(|e| {
-        eprintln!("Failed to delete API key: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    api_key::Entity::delete(key.into_active_model()).exec(&db).await?;
 
     Ok(Json(serde_json::json!({
         "message": "API Key deleted successfully"
