@@ -1,17 +1,18 @@
 # Media Blob Kit
 
-A Rust/Axum application with SeaORM and PostgreSQL.
+A high-performance media blob management system built with Rust, Axum, SeaORM, and PostgreSQL. Features secure authentication, role-based access control, and efficient project management.
 
 ## Prerequisites
 
 - Rust (latest stable)
-- PostgreSQL running on port 5432
+- PostgreSQL
+- AWS S3/S3 Compatible Storage
 
 ## Setup
 
 1.  Create a `.env` file with your DB credentials:
     ```env
-    DATABASE_URL=postgres://username:yoursecretpassword@localhost:5432/media_blob_kit
+    DATABASE_URL=postgres://username:yoursecretpassword@localhost:port/database_name
     ```
 
 2.  Run migrations:
@@ -50,28 +51,37 @@ MediaBlobKit is a Rust-based web application built with Axum, SeaORM, and Postgr
 media-blob-kit/
 ├── src/
 │   ├── main.rs                 # App entry point with CLI commands
+│   ├── config.rs               # Configuration loading
+│   ├── error.rs                # Application error handling
+│   ├── pagination.rs           # Pagination utilities
 │   ├── entities/               # Database entity models
 │   │   ├── mod.rs
-│   │   ├── user.rs            # User entity with roles (su, admin, user)
-│   │   └── refresh_token.rs   # Refresh token entity
-│   ├── middleware/            # Auth & authorization middleware
+│   │   ├── user.rs             # User entity
+│   │   ├── refresh_token.rs    # Refresh token entity
+│   │   ├── project.rs          # Project entity
+│   │   └── api_key.rs          # API Key entity
+│   ├── middleware/             # Auth & authorization middleware
 │   │   ├── mod.rs
-│   │   ├── auth.rs            # JWT authentication middleware
-│   │   └── role.rs            # Role-based authorization (require_su)
-│   └── routes/                # API route handlers
-│       ├── mod.rs             # Route registration with middleware
-│       ├── auth.rs            # Auth endpoints (login, refresh, logout, me)
-│       ├── users.rs           # User management (su-only)
-│       └── home.rs            # Root HTML page
+│   │   ├── auth.rs             # JWT authentication middleware
+│   │   └── role.rs             # Role-based authorization
+│   └── routes/                 # API route handlers
+│       ├── mod.rs              # Route registration
+│       ├── auth.rs             # Auth endpoints
+│       ├── users.rs            # User management
+│       ├── projects.rs         # Project management
+│       ├── api_keys.rs         # API Key management
+│       └── home.rs             # Root HTML page
 ├── migration/                  # Database migrations
 │   ├── src/
 │   │   ├── lib.rs
 │   │   ├── m20240101_000001_create_user_table.rs
-│   │   └── m20241201_000002_create_refresh_tokens_table.rs
+│   │   ├── m20241201_000002_create_refresh_tokens_table.rs
+│   │   ├── m20241202_000003_create_projects_table.rs
+│   │   └── m20241202_000004_create_api_keys_table.rs
 │   └── Cargo.toml
 ├── utils/
-│   └── reset_db.rs            # Database reset utility
-├── .env                        # Environment variables (DB_URL, JWT_SECRET)
+│   └── reset_db.rs             # Database reset utility
+├── .env                        # Environment variables
 ├── Cargo.toml                  # Project dependencies
 ├── IMPLEMENTATION.md           # Comprehensive roadmap
 └── README.md                   # User documentation
@@ -99,17 +109,14 @@ media-blob-kit/
 
 ### User Management (Su-only)
 - Create admin/user accounts
-- List all users
+- List all users (Paginated)
 - Delete users (prevents self-deletion)
 
-### API Endpoints
-- `POST /auth/login` - User authentication
-- `POST /auth/refresh` - Token refresh
-- `POST /auth/logout` - Token revocation
-- `GET /auth/me` - Current user profile
-- `POST /users` - Create user (su-only)
-- `GET /users` - List users (su-only)
-- `DELETE /users/{id}` - Delete user (su-only)
+### Core Improvements
+- **Pagination**: Standardized pagination with metadata (total items, pages) for all list endpoints.
+- **Configuration**: Centralized, type-safe configuration loading from environment variables.
+- **Error Handling**: Unified, structured error responses across the entire API.
+- **Performance**: Optimized authentication context to reduce database lookups.
 
 ### API Documentation
 
@@ -133,11 +140,17 @@ To test authenticated endpoints:
 - admin: Project and file management (Phase 3)
 - user: Basic access (TBD)
 
+### Project Management
+- Create and manage projects
+- Generate and manage API keys
+- Paginated list views for projects and keys
+
 ### CLI Commands
 - `cargo run -- migrate` - Apply migrations
 - `cargo run -- reset` - Refresh database
 - `cargo run -- create-superuser --username <name>` - Create superuser account
 - `cargo run` - Start the web server
+- `cargo check` - Check for errors
 
 ## 📚 Tech Stack
 Framework: Axum 0.8.7
@@ -302,22 +315,29 @@ All user management endpoints require superuser authentication.
 
 -   **`GET /users`** - List all users
     -   **Headers:** `Authorization: Bearer <access_token>` (su role required)
+    -   **Query Params:** `?page=1&limit=10`
     -   **Response:**
         ```json
-        [
-          {
-            "id": 1,
-            "username": "riz",
-            "role": "su",
-            "created_at": "2024-12-01T10:00:00"
-          },
-          {
-            "id": 2,
-            "username": "john_admin",
-            "role": "admin",
-            "created_at": "2024-12-01T12:00:00"
-          }
-        ]
+        {
+          "data": [
+            {
+              "id": 1,
+              "username": "riz",
+              "role": "su",
+              "created_at": "2024-12-01T10:00:00"
+            },
+            {
+              "id": 2,
+              "username": "john_admin",
+              "role": "admin",
+              "created_at": "2024-12-01T12:00:00"
+            }
+          ],
+          "total_items": 2,
+          "total_pages": 1,
+          "current_page": 1,
+          "page_size": 10
+        }
         ```
 
 -   **`DELETE /users/{id}`** - Delete a user
@@ -329,6 +349,84 @@ All user management endpoints require superuser authentication.
         }
         ```
     -   **Note:** Cannot delete yourself
+
+#### Project Management
+
+-   **`GET /projects`** - List projects (Paginated)
+    -   **Headers:** `Authorization: Bearer <access_token>`
+    -   **Query Params:** `?page=1&limit=10`
+    -   **Response:**
+        ```json
+        {
+          "data": [
+            {
+              "id": "uuid...",
+              "name": "My Project",
+              "owner_id": "uuid...",
+              "settings": {},
+              "created_at": "..."
+            }
+          ],
+          "total_items": 1,
+          "total_pages": 1,
+          "current_page": 1,
+          "page_size": 10
+        }
+        ```
+
+-   **`POST /projects`** - Create a new project
+    -   **Headers:** `Authorization: Bearer <access_token>`
+    -   **Request Body:**
+        ```json
+        {
+          "name": "New Project",
+          "settings": { "quota": 100 }
+        }
+        ```
+
+-   **`GET /projects/{id}`** - Get project details
+    -   **Headers:** `Authorization: Bearer <access_token>`
+
+-   **`PUT /projects/{id}`** - Update project
+    -   **Headers:** `Authorization: Bearer <access_token>`
+
+-   **`DELETE /projects/{id}`** - Delete project (Soft delete)
+    -   **Headers:** `Authorization: Bearer <access_token>`
+
+#### API Keys
+
+-   **`GET /projects/{id}/keys`** - List API keys (Paginated)
+    -   **Headers:** `Authorization: Bearer <access_token>`
+    -   **Query Params:** `?page=1&limit=10`
+
+-   **`POST /projects/{id}/keys`** - Create API key
+    -   **Headers:** `Authorization: Bearer <access_token>`
+    -   **Request Body:**
+        ```json
+        {
+          "name": "Production Key",
+          "expires_at": "2025-01-01T00:00:00Z"
+        }
+        ```
+    -   **Response:** Returns the raw API key (only once!)
+
+-   **`PATCH /projects/{id}/keys/{key_id}`** - Enable/Disable API key
+    -   **Headers:** `Authorization: Bearer <access_token>`
+    -   **Request Body:**
+        ```json
+        {
+          "is_active": false
+        }
+        ```
+    -   **Response:**
+        ```json
+        {
+          "message": "API Key updated successfully"
+        }
+        ```
+
+-   **`DELETE /projects/{id}/keys/{key_id}`** - Permanently delete API key
+    -   **Headers:** `Authorization: Bearer <access_token>`
 
 #### General
 

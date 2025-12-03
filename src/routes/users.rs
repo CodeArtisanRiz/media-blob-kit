@@ -3,7 +3,10 @@ use axum::{
     http::StatusCode,
     response::Json,
 };
-use sea_orm::{DatabaseConnection, EntityTrait, ActiveModelTrait, Set, QuerySelect, ModelTrait};
+use sea_orm::{
+    DatabaseConnection, EntityTrait, ActiveModelTrait, Set, ModelTrait, PaginatorTrait,
+    QueryOrder,
+};
 use serde::{Deserialize, Serialize};
 use argon2::{
     password_hash::{rand_core::OsRng, PasswordHasher, SaltString},
@@ -12,7 +15,7 @@ use argon2::{
 use crate::entities::user::{self, Entity as User};
 use crate::middleware::auth::AuthUser;
 use uuid::Uuid;
-use crate::pagination::Pagination;
+use crate::pagination::{Pagination, PaginatedResponse};
 use axum::extract::Query;
 use crate::error::AppError;
 
@@ -123,7 +126,7 @@ pub async fn create_user(
         Pagination
     ),
     responses(
-        (status = 200, description = "List of all users", body = [UserResponse]),
+        (status = 200, description = "List of all users", body = PaginatedResponse<UserResponse>),
         (status = 500, description = "Internal server error")
     ),
     security(
@@ -135,17 +138,22 @@ pub async fn list_users(
     State(db): State<DatabaseConnection>,
     _auth_user: axum::Extension<AuthUser>,
     Query(pagination): Query<Pagination>,
-) -> Result<Json<Vec<UserResponse>>, AppError> {
+) -> Result<Json<PaginatedResponse<UserResponse>>, AppError> {
     println!("List users request");
 
-    let users = User::find()
-        .limit(pagination.limit())
-        .offset(pagination.offset())
-        .all(&db)
-        .await?;
+    let page = pagination.page.unwrap_or(1);
+    let limit = pagination.limit.unwrap_or(10);
+
+    let paginator = User::find()
+        .order_by_desc(user::Column::CreatedAt)
+        .paginate(&db, limit);
+
+    let total_items = paginator.num_items().await.map_err(AppError::DatabaseError)?;
+    let users = paginator.fetch_page(page - 1).await.map_err(AppError::DatabaseError)?;
 
     let user_responses: Vec<UserResponse> = users.into_iter().map(UserResponse::from).collect();
-    Ok(Json(user_responses))
+    
+    Ok(Json(PaginatedResponse::new(user_responses, total_items, page, limit)))
 }
 
 #[utoipa::path(

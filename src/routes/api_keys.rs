@@ -4,7 +4,7 @@ use axum::{
 };
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter,
-    Set, QuerySelect,
+    Set, QueryOrder, PaginatorTrait,
 };
 use serde::{Deserialize, Serialize};
 use sha2::{Digest, Sha256};
@@ -12,10 +12,10 @@ use uuid::Uuid;
 use rand::{RngCore, thread_rng};
 use base64::{Engine as _, engine::general_purpose};
 
-use crate::entities::{api_key, project};
+use crate::entities::{api_key::{self, Entity as ApiKey}, project};
 use crate::middleware::auth::AuthUser;
 use crate::error::AppError;
-use crate::pagination::Pagination;
+use crate::pagination::{Pagination, PaginatedResponse};
 use axum::extract::Query;
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -123,7 +123,7 @@ pub async fn create_api_key(
         Pagination
     ),
     responses(
-        (status = 200, description = "List of API Keys", body = [ApiKeyResponse]),
+        (status = 200, description = "List of API Keys", body = PaginatedResponse<ApiKeyResponse>),
         (status = 404, description = "Project not found"),
         (status = 500, description = "Internal server error")
     ),
@@ -137,7 +137,7 @@ pub async fn list_api_keys(
     auth_user: axum::Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
     Query(pagination): Query<Pagination>,
-) -> Result<Json<Vec<ApiKeyResponse>>, AppError> {
+) -> Result<Json<PaginatedResponse<ApiKeyResponse>>, AppError> {
     println!("List API keys request for project: {}", project_id);
 
     // Verify project ownership
@@ -145,18 +145,27 @@ pub async fn list_api_keys(
         .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
         .one(&db)
-        .await?
-        .ok_or(AppError::NotFound("Project not found".to_string()))?;
+        .await
+        .map_err(AppError::DatabaseError)?;
 
-    let keys = api_key::Entity::find()
-        .filter(api_key::Column::ProjectId.eq(project.id))
-        .limit(pagination.limit())
-        .offset(pagination.offset())
-        .all(&db)
-        .await?;
+    if project.is_none() {
+        return Err(AppError::NotFound("Project not found".to_string()));
+    }
 
-    let responses: Vec<ApiKeyResponse> = keys.into_iter().map(ApiKeyResponse::from).collect();
-    Ok(Json(responses))
+    let page = pagination.page.unwrap_or(1);
+    let limit = pagination.limit.unwrap_or(10);
+
+    let paginator = ApiKey::find()
+        .filter(api_key::Column::ProjectId.eq(project_id))
+        .order_by_desc(api_key::Column::CreatedAt)
+        .paginate(&db, limit);
+
+    let total_items = paginator.num_items().await.map_err(AppError::DatabaseError)?;
+    let api_keys = paginator.fetch_page(page - 1).await.map_err(AppError::DatabaseError)?;
+
+    let responses: Vec<ApiKeyResponse> = api_keys.into_iter().map(ApiKeyResponse::from).collect();
+    
+    Ok(Json(PaginatedResponse::new(responses, total_items, page, limit)))
 }
 
 #[utoipa::path(

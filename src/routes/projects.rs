@@ -5,16 +5,16 @@ use axum::{
 };
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, IntoActiveModel, QueryFilter,
-    Set, QuerySelect,
+    QueryOrder, Set, PaginatorTrait,
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 use uuid::Uuid;
 
 use crate::entities::project::{self, Entity as Project};
-use crate::middleware::auth::AuthUser;
 use crate::error::AppError;
-use crate::pagination::Pagination;
+use crate::middleware::auth::AuthUser;
+use crate::pagination::{Pagination, PaginatedResponse};
 use axum::extract::Query;
 
 #[derive(Deserialize, utoipa::ToSchema)]
@@ -102,7 +102,7 @@ pub async fn create_project(
         Pagination
     ),
     responses(
-        (status = 200, description = "List of user's projects", body = [ProjectResponse]),
+        (status = 200, description = "List of user's projects", body = PaginatedResponse<ProjectResponse>),
         (status = 500, description = "Internal server error")
     ),
     security(
@@ -114,20 +114,24 @@ pub async fn list_projects(
     State(db): State<DatabaseConnection>,
     auth_user: axum::Extension<AuthUser>,
     Query(pagination): Query<Pagination>,
-) -> Result<Json<Vec<ProjectResponse>>, AppError> {
+) -> Result<Json<PaginatedResponse<ProjectResponse>>, AppError> {
     println!("List projects request for user: {}", auth_user.username);
 
-    // Filter by owner_id and deleted_at is null
-    let projects = Project::find()
+    let page = pagination.page.unwrap_or(1);
+    let limit = pagination.limit.unwrap_or(10);
+
+    let paginator = Project::find()
         .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
-        .limit(pagination.limit())
-        .offset(pagination.offset())
-        .all(&db)
-        .await?;
+        .order_by_desc(project::Column::CreatedAt)
+        .paginate(&db, limit);
+
+    let total_items = paginator.num_items().await.map_err(AppError::DatabaseError)?;
+    let projects = paginator.fetch_page(page - 1).await.map_err(AppError::DatabaseError)?;
 
     let responses: Vec<ProjectResponse> = projects.into_iter().map(ProjectResponse::from).collect();
-    Ok(Json(responses))
+    
+    Ok(Json(PaginatedResponse::new(responses, total_items, page, limit)))
 }
 
 #[utoipa::path(

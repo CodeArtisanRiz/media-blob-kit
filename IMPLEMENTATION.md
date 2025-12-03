@@ -7,7 +7,7 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
 
 - [x] **Project Configuration**
     - [x] Setup `dotenv` for environment variables (DB_URL, JWT_SECRET, AWS_ACCESS_KEY, etc.).
-    - [ ] Create a `Config` struct to load and validate env vars.
+    - [x] Create a `Config` struct to load and validate env vars.
 - [x] **Database Setup**
     - [x] Choose an ORM/Query Builder (e.g., `sqlx` or `sea-orm`).
     - [x] Setup PostgreSQL database.
@@ -60,7 +60,20 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [x] `PATCH /projects/:id/keys/:key_id`: Enable/Disable an API key.
     - [x] `DELETE /projects/:id/keys/:key_id`: Permanently delete an API key.
 
-## Phase 4: File Upload & S3 Integration
+## Phase 4: Core Improvements & Refactoring
+**Goal**: Enhance code quality, performance, and standard features.
+
+- [x] **Pagination**
+    - [x] Create reusable `Pagination` and `PaginatedResponse` structs.
+    - [x] Implement pagination for `list_projects`, `list_api_keys`, and `list_users`.
+- [x] **Error Handling**
+    - [x] Create `AppError` enum for structured error handling.
+    - [x] Refactor all routes to use `AppError`.
+- [x] **Optimization**
+    - [x] Embed `user_id` in JWT to reduce database lookups.
+    - [x] Centralize configuration management.
+
+## Phase 5: File Upload & S3 Integration
 **Goal**: Implement generic file uploads to S3.
 
 - [ ] **S3 Integration**
@@ -73,7 +86,7 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [ ] Stream file to S3 bucket under `{projectId}/files/{fileId}.{ext}`.
     - [ ] Record metadata in DB.
 
-## Phase 5: Asynchronous Image Processing
+## Phase 6: Asynchronous Image Processing
 **Goal**: Handle image resizing and optimization in the background.
 
 - [ ] **Queue System**
@@ -87,7 +100,7 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
 - [ ] **Integration**
     - [ ] Trigger a job upon successful image upload in Phase 4.
 
-## Phase 6: File Retrieval & Serving
+## Phase 7: File Retrieval & Serving
 **Goal**: Serve files and specific image variants.
 
 - [ ] **Retrieval API**
@@ -96,7 +109,7 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [ ] Support query params for variants (e.g., `?variant=thumbnail`).
     - [ ] Implement "Lazy Processing": If variant doesn't exist, trigger job and return original/placeholder.
 
-## Phase 7: Cleanup & Advanced Features
+## Phase 8: Cleanup & Advanced Features
 **Goal**: Maintenance tasks and polish.
 
 - [ ] **Deletion Logic**
@@ -106,7 +119,7 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [ ] Scheduled job to remove "soft deleted" items after X days.
     - [ ] Scheduled job to clean orphaned S3 objects.
 
-## Phase 8: API Documentation
+## Phase 9: API Documentation
 **Goal**: Provide interactive API documentation via Swagger/OpenAPI.
 
 - [x] **OpenAPI Integration**
