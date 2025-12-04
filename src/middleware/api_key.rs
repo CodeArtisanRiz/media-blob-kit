@@ -25,45 +25,66 @@ pub async fn api_key_auth(
     mut request: Request,
     next: Next,
 ) -> Result<Response, AppError> {
-    let api_key_header = headers
-        .get("x-api-key")
-        .ok_or(AppError::Unauthorized("Missing API Key".to_string()))?
-        .to_str()
-        .map_err(|_| AppError::Unauthorized("Invalid API Key format".to_string()))?;
+    let method = request.method().to_string();
+    let uri = request.uri().to_string();
+
+    let api_key_header = match headers.get("x-api-key") {
+        Some(header) => header.to_str().map_err(|_| {
+            println!("Auth | {} {} | res=401 | Invalid API Key format", method, uri);
+            AppError::Unauthorized("Invalid API Key format".to_string())
+        })?,
+        None => {
+            println!("Auth | {} {} | res=401 | Missing API Key", method, uri);
+            return Err(AppError::Unauthorized("Missing API Key".to_string()));
+        }
+    };
 
     let mut hasher = Sha256::new();
     hasher.update(api_key_header.as_bytes());
     let key_hash = format!("{:x}", hasher.finalize());
 
     // Find API Key and related Project
-    let (api_key, project) = ApiKey::find()
+    let result = ApiKey::find()
         .filter(api_key::Column::KeyHash.eq(&key_hash))
         .find_also_related(Project)
         .one(&db)
         .await
-        .map_err(AppError::DatabaseError)?
-        .ok_or(AppError::Unauthorized("Invalid API Key".to_string()))?;
+        .map_err(AppError::DatabaseError)?;
 
-    let project = project.ok_or(AppError::InternalServerError("Orphaned API Key".to_string()))?;
+    let (api_key, project) = match result {
+        Some(r) => r,
+        None => {
+            println!("Auth | {} {} | res=401 | Invalid API Key", method, uri);
+            return Err(AppError::Unauthorized("Invalid API Key".to_string()));
+        }
+    };
+
+    let project = match project {
+        Some(p) => p,
+        None => {
+            println!("Auth | {} {} | res=500 | Orphaned API Key", method, uri);
+            return Err(AppError::InternalServerError("Orphaned API Key".to_string()));
+        }
+    };
 
     if !api_key.is_active {
+        println!("Auth | {} {} | project={} | res=401 | API Key is inactive", method, uri, project.name);
         return Err(AppError::Unauthorized("API Key is inactive".to_string()));
     }
 
     if let Some(expires_at) = api_key.expires_at {
         if expires_at < chrono::Utc::now().naive_utc() {
+            println!("Auth | {} {} | project={} | res=401 | API Key has expired", method, uri, project.name);
             return Err(AppError::Unauthorized("API Key has expired".to_string()));
         }
     }
 
-    println!("Raw Project Settings: {:?}", project.settings);
     let settings: ProjectSettings = serde_json::from_value(project.settings.clone())
         .map_err(|e| {
             eprintln!("Failed to parse project settings: {}", e);
             e
         })
         .unwrap_or_default();
-    println!("Parsed Settings: {:?}", settings);
 
     request.extensions_mut().insert(ProjectContext {
         id: project.id,

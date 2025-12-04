@@ -12,8 +12,10 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [x] Choose an ORM/Query Builder (e.g., `sqlx` or `sea-orm`).
     - [x] Setup PostgreSQL database.
     - [x] Create initial migration for `users` table.
-- [ ] **Logging & Tracing**
-    - [ ] Configure `tracing-subscriber` for structured logging.
+- [x] **Logging & Tracing**
+    - [x] Implement structured logging with format: `Module | METHOD /path | context | res=code`
+    - [x] Log all requests with user/project context
+    - [x] Log all errors (4xx, 5xx) with full context
 
 ## Phase 2: Authentication & User Management
 **Goal**: Implement secure user login and user creation by superusers only.
@@ -78,33 +80,59 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [x] Embed `user_id` in JWT to reduce database lookups.
     - [x] Centralize configuration management.
 
-## Phase 5: File Upload & S3 Integration
+## Phase 5: File Upload & S3 Integration [Completed]
 **Goal**: Implement secure file uploads to S3 using API Key authentication.
 
 - [x] **S3 Integration**
     - [x] Setup AWS SDK (`aws-sdk-s3`).
     - [x] Create a helper service for S3 operations (upload, delete, presign).
+    - [x] **Fix**: Explicitly set credentials to resolve `SignatureDoesNotMatch`.
+    - [x] **Fix**: Enforce Public Bucket Policy (`s3:GetObject`) on upload to resolve `AccessDenied`.
 - [x] **File Models**
     - [x] Create migration for `files` table (id, project_id, s3_key, filename, mime_type, size, status, variants_json).
 - [x] **Upload API (API Key Auth)**
     - [x] Implement API Key middleware to resolve `project_id` from header.
     - [x] `POST /upload/file`: Standard file upload.
         - [x] Validates API Key.
-        - [x] Uploads file to S3 (`{projectId}/files/{fileId}.{ext}`).
+        - [x] Uploads file to S3 (`{project_name}-{project_id}/files/{uuid}.{ext}`).
         - [x] Returns public URL immediately.
     - [x] `POST /upload/image`: Image upload with processing.
         - [x] Validates API Key.
-        - [x] Uploads original image to S3.
-        - [x] Calculates future variant paths (e.g., thumbnail, medium).
+        - [x] Uploads original image to S3 (`{project_name}-{project_id}/images/original/{uuid}.{ext}`).
+        - [x] Calculates future variant paths based on `ProjectSettings`.
         - [x] Returns JSON with original URL and *future* variant URLs.
-        - [x] Enqueues `ImageProcessingJob`.
 
-## Phase 6: Asynchronous Image Processing
+> [!NOTE]
+> **File Storage Structure**:
+> All files are stored in a single S3 bucket defined by `S3_BUCKET_NAME`.
+> - **Files**: `{project_name}-{project_id}/files/{uuid}.{ext}`
+> - **Images**: `{project_name}-{project_id}/images/original/{uuid}.{ext}`
+> - **Variants**: `{project_name}-{project_id}/images/{variant_name}/{uuid}.{ext}`
+>
+> **UUID Naming**: Original filenames are ignored for storage to prevent collisions. A UUID is generated for every upload. The original filename is preserved in the database.
+
+## Phase 6: Jobs API [Completed]
+**Goal**: Monitor and manage background processing jobs.
+
+- [x] **Jobs Table**
+    - [x] Create migration for `jobs` table (id, file_id, status, payload, created_at, updated_at).
+- [x] **Jobs API (Project Level)**
+    - [x] `GET /jobs`: List jobs for the authenticated project.
+    - [x] Support filtering by status (`pending`, `processing`, `completed`, `failed`).
+    - [x] Support pagination.
+- [x] **Admin Jobs API (System Level)**
+    - [x] `GET /admin/jobs`: List jobs grouped by project.
+    - [x] Role-based access:
+        - Su: View all projects.
+        - Admin: View owned projects.
+    - [x] Support pagination per project.
+
+## Phase 7: Asynchronous Image Processing
 **Goal**: Handle image resizing and optimization in the background.
 
-- [ ] **Queue System**
-    - [ ] Choose a queue backend (Redis with `sidekiq-rs` or simple DB-backed queue).
-    - [ ] Define job structure: `ImageProcessingJob { file_id, variants_config }`.
+- [x] **Queue System**
+    - [x] Choose a queue backend (DB-backed queue selected).
+    - [x] Define job structure: `ImageProcessingJob` (via `Job` entity).
 - [ ] **Worker Service**
     - [ ] Create a background worker that polls/listens for jobs.
     - [ ] Implement image processing using `image` crate (resize, format conversion).
@@ -114,7 +142,7 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
 - [ ] **Integration**
     - [ ] Trigger a job upon successful image upload in Phase 5.
 
-## Phase 7: File Retrieval & Serving
+## Phase 8: File Retrieval & Serving
 **Goal**: Serve files and specific image variants.
 
 - [ ] **Retrieval API**
@@ -123,7 +151,7 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [ ] Support query params for variants (e.g., `?variant=thumbnail`).
     - [ ] Implement "Lazy Processing": If variant doesn't exist, trigger job and return original/placeholder.
 
-## Phase 8: Cleanup & Advanced Features
+## Phase 9: Cleanup & Advanced Features
 **Goal**: Maintenance tasks and polish.
 
 - [ ] **Deletion Logic**
@@ -133,7 +161,7 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [ ] Scheduled job to remove "soft deleted" items after X days.
     - [ ] Scheduled job to clean orphaned S3 objects.
 
-## Phase 9: API Documentation
+## Phase 10: API Documentation
 **Goal**: Provide interactive API documentation via Swagger/OpenAPI.
 
 - [x] **OpenAPI Integration**

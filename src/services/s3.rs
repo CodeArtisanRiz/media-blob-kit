@@ -36,15 +36,6 @@ impl S3Service {
 
         let client = Client::from_conf(s3_config_builder.build());
 
-        println!("--- S3 Service Configuration ---");
-        println!("Bucket: {}", config.s3_bucket_name);
-        println!("Region: {}", config.aws_region);
-        println!("Access Key: {}", config.aws_access_key_id);
-        if let Some(endpoint) = &config.s3_endpoint {
-            println!("Endpoint: {}", endpoint);
-        }
-        println!("--------------------------------");
-
         Self {
             client,
             bucket_name: config.s3_bucket_name.clone(),

@@ -86,7 +86,7 @@ pub async fn login(
     State(db): State<DatabaseConnection>,
     Json(payload): Json<LoginRequest>,
 ) -> Result<Json<LoginResponse>, AppError> {
-    println!("Login attempt for: {}", payload.username);
+
     let user = User::find()
         .filter(user::Column::Username.eq(&payload.username))
         .one(&db)
@@ -97,7 +97,7 @@ pub async fn login(
         })?;
 
     if let Some(user) = user {
-        println!("User found: {}", user.username);
+
         let parsed_hash = PasswordHash::new(&user.password).map_err(|e| {
             eprintln!("Password hash parse error: {}", e);
             AppError::InternalServerError("Password validation failed".to_string())
@@ -107,7 +107,7 @@ pub async fn login(
             .verify_password(payload.password.as_bytes(), &parsed_hash)
             .is_ok()
         {
-            println!("Password verified for: {}", user.username);
+
             let expiration = (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize;
             
             let claims = Claims {
@@ -148,16 +148,17 @@ pub async fn login(
                 AppError::DatabaseError(e)
             })?;
 
+            println!("Auth | POST /auth/login | user={} | res=200", user.username);
             return Ok(Json(LoginResponse {
                 access_token: access_token,
                 refresh_token: refresh_token_str,
                 expires_in: 3600,
             }));
         } else {
-            println!("Password verification failed for: {}", user.username);
+            println!("Auth | POST /auth/login | user={} | res=401 (invalid password)", user.username);
         }
     } else {
-        println!("User not found: {}", payload.username);
+        println!("Auth | POST /auth/login | user={} | res=401 (not found)", payload.username);
     }
 
     Err(AppError::Unauthorized("Invalid credentials".to_string()))
@@ -182,7 +183,7 @@ pub async fn refresh(
     State(db): State<DatabaseConnection>,
     Json(payload): Json<RefreshRequest>,
 ) -> Result<Json<RefreshResponse>, AppError> {
-    println!("Refresh token request");
+
     
     let token_hash = hash_token(&payload.refresh_token);
     
@@ -230,6 +231,7 @@ pub async fn refresh(
 
     // Generate new access token
     let expiration = (chrono::Utc::now() + chrono::Duration::hours(1)).timestamp() as usize;
+    let username = user.username.clone();
 
     let claims = Claims {
         sub: user.username,
@@ -246,7 +248,7 @@ pub async fn refresh(
             AppError::InternalServerError("Failed to generate token".to_string())
         })?;
 
-    println!("New access token generated");
+    println!("Auth | POST /auth/refresh | user={} | res=200", username);
     Ok(Json(RefreshResponse { access_token: token }))
 }
 
@@ -283,6 +285,7 @@ pub async fn logout(
         AppError::DatabaseError(e)
     })?;
 
+    println!("Auth | POST /auth/logout | res=200");
     Ok(Json(LogoutResponse {
         message: "Logged out successfully".to_string(),
     }))
@@ -323,5 +326,6 @@ pub async fn me(
         })?
         .ok_or(AppError::Unauthorized("User not found".to_string()))?;
 
+    println!("Auth | GET /auth/me | user={} | res=200", user.username);
     Ok(Json(crate::routes::users::UserResponse::from(user)))
 }

@@ -4,6 +4,7 @@ mod users;
 mod projects;
 mod api_keys;
 pub mod upload;
+mod jobs;
 
 use axum::{
     routing::{get, post, delete},
@@ -45,6 +46,9 @@ use utoipa_swagger_ui::SwaggerUi;
         // Upload endpoints
         upload::upload_file,
         upload::upload_image,
+        // Jobs endpoints
+        jobs::list_jobs,
+        jobs::list_admin_jobs,
     ),
     components(
         schemas(
@@ -75,6 +79,9 @@ use utoipa_swagger_ui::SwaggerUi;
             // Upload schemas
             upload::FileUploadResponse,
             upload::ImageUploadResponse,
+            // Job schemas
+            jobs::JobResponse,
+            jobs::PaginatedProjectJobsResponse,
         )
     ),
     tags(
@@ -83,7 +90,8 @@ use utoipa_swagger_ui::SwaggerUi;
         (name = "User Management", description = "User management endpoints (superuser access required)"),
         (name = "Project Management", description = "Project management endpoints"),
         (name = "Project API Keys", description = "API Key management endpoints"),
-        (name = "File Upload", description = "File and Image upload endpoints")
+        (name = "File Upload", description = "File and Image upload endpoints"),
+        (name = "Jobs", description = "Background job management endpoints")
     ),
     info(
         title = "MediaBlobKit API",
@@ -137,6 +145,7 @@ pub fn create_routes(db: DatabaseConnection) -> Router {
         .route("/projects/{id}/keys", get(api_keys::list_api_keys))
         .route("/projects/{id}/keys/{key_id}", axum::routing::patch(api_keys::update_api_key))
         .route("/projects/{id}/keys/{key_id}", delete(api_keys::delete_api_key))
+        .route("/admin/jobs", get(jobs::list_admin_jobs))
         .layer(middleware::from_fn(auth_middleware));
 
     // Su-only routes
@@ -159,6 +168,7 @@ pub fn create_routes(db: DatabaseConnection) -> Router {
             Router::new()
                 .route("/upload/file", post(upload::upload_file))
                 .route("/upload/image", post(upload::upload_image))
+                .route("/jobs", get(jobs::list_jobs))
                 .layer(axum::middleware::from_fn_with_state(db.clone(), crate::middleware::api_key::api_key_auth))
         )
         .with_state(db);

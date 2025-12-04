@@ -112,11 +112,47 @@ media-blob-kit/
 - List all users (Paginated)
 - Delete users (prevents self-deletion)
 
+### File Uploads & Storage
+- **S3 Integration**: Seamless upload to AWS S3 or MinIO.
+- **Project Isolation**: Files are organized by project folders within a single bucket.
+- **Public Access**: Automatic public bucket policy configuration.
+- **Image Processing**:
+    - Automatic variant path calculation.
+    - Asynchronous resizing (Coming in Phase 6).
+- **Security**:
+    - API Key authentication for uploads.
+    - UUID-based filenames to prevent collisions and malicious naming.
+
 ### Core Improvements
 - **Pagination**: Standardized pagination with metadata (total items, pages) for all list endpoints.
 - **Configuration**: Centralized, type-safe configuration loading from environment variables.
 - **Error Handling**: Unified, structured error responses across the entire API.
 - **Performance**: Optimized authentication context to reduce database lookups.
+
+### Structured Logging
+All API requests and errors are logged with a consistent, structured format:
+
+```
+Module | METHOD /path | context | res=code
+```
+
+**Example Logs:**
+```
+Auth | POST /auth/login | user=riz | res=200
+Auth | GET /auth/me | user=riz | res=200
+User | POST /users | user=riz | created=john | res=201
+User | GET /users | user=riz | count=5 | res=200
+User | DELETE /users/uuid | user=riz | res=404 | User not found
+Project | POST /projects | user=riz | name=myapp | res=201
+Project | GET /projects | user=riz | count=3 | res=200
+ApiKey | POST /projects/uuid/keys | user=riz | res=201
+Upload | POST /upload/file | project=myapp | file=doc.pdf | res=200
+Upload | POST /upload/image | project=myapp | file=uuid | res=200
+Jobs | GET /jobs | project=myapp | count=5 | res=200
+Jobs | GET /admin/jobs | user=riz | projects=3 | res=200
+Error | res=401 | Missing API Key
+Error | res=404 | User not found
+```
 
 ### API Documentation
 
@@ -160,16 +196,17 @@ Password Hashing: Argon2 0.5.3
 JWT: jsonwebtoken 9.3.0
 Async Runtime: Tokio 1.48.0
 CLI: Clap 4.5.21
+AWS SDK: aws-sdk-s3 1.60.1
+
 ## 🚀 Implementation Roadmap
 
-The [`IMPLEMENTATION.md`](IMPLEMENTATION.md) file outlines a comprehensive 7-phase plan for MediaBlobKit.
+The [`IMPLEMENTATION.md`](IMPLEMENTATION.md) file outlines a comprehensive 10-phase plan for MediaBlobKit.
 
 **Phase 1: Foundation & Infrastructure**
 - ✅ Completed: Database setup (PostgreSQL + SeaORM)
 - ✅ Completed: Environment configuration with `.env`
 - ✅ Completed: Migration system with reset capability
-- ⏳ Pending: Config struct for env validation
-- ⏳ Pending: Structured logging with tracing-subscriber
+- ✅ Completed: Config struct for env validation
 
 **Phase 2: Authentication & User Management**
 - ✅ Completed: Dual-token authentication (access + refresh tokens)
@@ -185,31 +222,41 @@ The [`IMPLEMENTATION.md`](IMPLEMENTATION.md) file outlines a comprehensive 7-pha
 - ✅ Completed: Admin/user project permissions
 - ✅ Completed: API Key management (Create, List, Revoke, Patch)
 
-**Phase 4: File Upload & S3 Integration**
+**Phase 4: Core Improvements**
+- ✅ Completed: Pagination, Error Handling, Optimization
+
+**Phase 5: File Upload & S3 Integration**
 - ✅ Completed: AWS S3 integration setup
 - ✅ Completed: File models & migrations
-- ✅ Completed: File metadata management
-- ✅ Completed: Multipart upload endpoints
+- ✅ Completed: Multipart upload endpoints (File & Image)
+- ✅ Completed: Public bucket policy automation
+- ✅ Completed: Project-specific S3 folder structure
 
-**Phase 5: Asynchronous Image Processing**
-- ⏳ Pending: Queue system (Redis or DB-backed)
+**Phase 6: Jobs API**
+- ✅ Completed: Jobs table & migration
+- ✅ Completed: Project-level Jobs API (`GET /jobs`)
+- ✅ Completed: Admin-level Jobs Dashboard (`GET /admin/jobs`)
+- ✅ Completed: Status filtering & Pagination
+
+**Phase 7: Asynchronous Image Processing**
+- ✅ Completed: Queue system (DB-backed)
 - ⏳ Pending: Background worker service
 - ⏳ Pending: Image resizing and optimization
 - ⏳ Pending: Variant generation and storage
 
-**Phase 6: File Retrieval & Serving**
+**Phase 8: File Retrieval & Serving**
 - ⏳ Pending: File metadata and URL endpoints
 - ⏳ Pending: S3 presigned URLs or proxy
 - ⏳ Pending: Image variant serving
 - ⏳ Pending: Lazy processing for on-demand variants
 
-**Phase 7: Cleanup & Advanced Features**
+**Phase 9: Cleanup & Advanced Features**
 - ⏳ Pending: Hard and cascade delete logic
 - ⏳ Pending: Scheduled cleanup jobs
 - ⏳ Pending: Orphaned S3 object cleanup
 - ⏳ Pending: API key generation for programmatic uploads
 
-**Phase 8: API Documentation**
+**Phase 10: API Documentation**
 - ✅ Completed: OpenAPI Integration
 - ✅ Completed: Endpoint Documentation
 - ✅ Completed: Swagger UI
@@ -428,6 +475,79 @@ All user management endpoints require superuser authentication.
 
 -   **`DELETE /projects/{id}/keys/{key_id}`** - Permanently delete API key
     -   **Headers:** `Authorization: Bearer <access_token>`
+
+#### File Uploads
+
+-   **`POST /upload/file`** - Standard File Upload
+    -   **Headers:** `x-api-key: <your_project_api_key>`
+    -   **Body:** `multipart/form-data` with field `file`
+    -   **Response:**
+        ```json
+        {
+          "id": "uuid...",
+          "url": "https://s3.../project-id/files/uuid.pdf",
+          "filename": "original.pdf",
+          "mime_type": "application/pdf",
+          "size": 1024
+        }
+        ```
+
+-   **`POST /upload/image`** - Image Upload
+    -   **Headers:** `x-api-key: <your_project_api_key>`
+    -   **Body:** `multipart/form-data` with field `file`
+    -   **Response:**
+        ```json
+        {
+          "id": "uuid...",
+          "original_url": "https://s3.../project-id/images/original/uuid.jpg",
+          "variants": {
+            "thumbnail": "https://s3.../project-id/images/thumbnail/uuid.jpg",
+            "medium": "https://s3.../project-id/images/medium/uuid.webp"
+          }
+        }
+        ```
+
+#### Jobs API
+
+-   **`GET /jobs`** - List jobs for the authenticated project
+    -   **Headers:** `x-api-key: <your_project_api_key>`
+    -   **Query Params:** `?status=pending&page=1&limit=10`
+    -   **Response:**
+        ```json
+        {
+          "My Project": {
+            "project_id": "uuid...",
+            "jobs": [
+              {
+                "id": "uuid...",
+                "status": "pending",
+                "payload": { ... },
+                "created_at": "..."
+              }
+            ],
+            "total_items": 1,
+            "total_pages": 1,
+            "current_page": 1,
+            "page_size": 10
+          }
+        }
+        ```
+
+-   **`GET /admin/jobs`** - Admin Jobs Dashboard
+    -   **Headers:** `Authorization: Bearer <access_token>`
+    -   **Query Params:** `?page=1&limit=10`
+    -   **Response:** Returns a map of projects with their paginated jobs.
+        ```json
+        {
+          "Project A": {
+            "project_id": "uuid...",
+            "jobs": [ ... ],
+            "total_items": 5,
+            ...
+          },
+          "Project B": { ... }
+        }
+        ```
 
 #### General
 

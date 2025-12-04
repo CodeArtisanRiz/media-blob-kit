@@ -76,7 +76,7 @@ pub async fn create_project(
     auth_user: axum::Extension<AuthUser>,
     Json(payload): Json<CreateProjectRequest>,
 ) -> Result<(StatusCode, Json<ProjectResponse>), AppError> {
-    println!("Create project request for user: {}", auth_user.username);
+
 
     let project = project::ActiveModel {
         id: Set(Uuid::new_v4()),
@@ -91,7 +91,7 @@ pub async fn create_project(
 
     let created_project = project.insert(&db).await?;
 
-    println!("Project '{}' created successfully", created_project.name);
+    println!("Project | POST /projects | user={} | name={} | res=201", auth_user.username, created_project.name);
     Ok((StatusCode::CREATED, Json(ProjectResponse::from(created_project))))
 }
 
@@ -115,7 +115,7 @@ pub async fn list_projects(
     auth_user: axum::Extension<AuthUser>,
     Query(pagination): Query<Pagination>,
 ) -> Result<Json<PaginatedResponse<ProjectResponse>>, AppError> {
-    println!("List projects request for user: {}", auth_user.username);
+
 
     let page = pagination.page.unwrap_or(1);
     let limit = pagination.limit.unwrap_or(10);
@@ -131,6 +131,7 @@ pub async fn list_projects(
 
     let responses: Vec<ProjectResponse> = projects.into_iter().map(ProjectResponse::from).collect();
     
+    println!("Project | GET /projects | user={} | count={} | res=200", auth_user.username, total_items);
     Ok(Json(PaginatedResponse::new(responses, total_items, page, limit)))
 }
 
@@ -155,16 +156,22 @@ pub async fn get_project(
     auth_user: axum::Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<ProjectResponse>, AppError> {
-    println!("Get project request for ID: {}", project_id);
-
     let project = Project::find_by_id(project_id)
         .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
         .one(&db)
-        .await?
-        .ok_or(AppError::NotFound("Project not found".to_string()))?;
+        .await?;
 
-    Ok(Json(ProjectResponse::from(project)))
+    match project {
+        Some(p) => {
+            println!("Project | GET /projects/{} | user={} | res=200", project_id, auth_user.username);
+            Ok(Json(ProjectResponse::from(p)))
+        }
+        None => {
+            println!("Project | GET /projects/{} | user={} | res=404 | Project not found", project_id, auth_user.username);
+            Err(AppError::NotFound("Project not found".to_string()))
+        }
+    }
 }
 
 #[utoipa::path(
@@ -190,32 +197,37 @@ pub async fn update_project(
     Path(project_id): Path<Uuid>,
     Json(payload): Json<UpdateProjectRequest>,
 ) -> Result<Json<ProjectResponse>, AppError> {
-    println!("Update project request for ID: {}", project_id);
-
     let project = Project::find_by_id(project_id)
         .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
         .one(&db)
-        .await?
-        .ok_or(AppError::NotFound("Project not found".to_string()))?;
+        .await?;
 
-    let mut active_project = project.into_active_model();
-    
-    if let Some(name) = payload.name {
-        active_project.name = Set(name);
-    }
-    if let Some(description) = payload.description {
-        active_project.description = Set(Some(description));
-    }
-    if let Some(settings) = payload.settings {
-        active_project.settings = Set(settings);
-    }
-    
-    active_project.updated_at = Set(chrono::Utc::now().naive_utc());
+    match project {
+        Some(p) => {
+            let mut active_project = p.into_active_model();
+            
+            if let Some(name) = payload.name {
+                active_project.name = Set(name);
+            }
+            if let Some(description) = payload.description {
+                active_project.description = Set(Some(description));
+            }
+            if let Some(settings) = payload.settings {
+                active_project.settings = Set(settings);
+            }
+            
+            active_project.updated_at = Set(chrono::Utc::now().naive_utc());
+            let updated_project = active_project.update(&db).await?;
 
-    let updated_project = active_project.update(&db).await?;
-
-    Ok(Json(ProjectResponse::from(updated_project)))
+            println!("Project | PUT /projects/{} | user={} | res=200", project_id, auth_user.username);
+            Ok(Json(ProjectResponse::from(updated_project)))
+        }
+        None => {
+            println!("Project | PUT /projects/{} | user={} | res=404 | Project not found", project_id, auth_user.username);
+            Err(AppError::NotFound("Project not found".to_string()))
+        }
+    }
 }
 
 #[utoipa::path(
@@ -239,21 +251,26 @@ pub async fn delete_project(
     auth_user: axum::Extension<AuthUser>,
     Path(project_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    println!("Delete project request for ID: {}", project_id);
-
     let project = Project::find_by_id(project_id)
         .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
         .one(&db)
-        .await?
-        .ok_or(AppError::NotFound("Project not found".to_string()))?;
+        .await?;
 
-    let mut active_project = project.into_active_model();
-    active_project.deleted_at = Set(Some(chrono::Utc::now().naive_utc()));
-    
-    active_project.update(&db).await?;
+    match project {
+        Some(p) => {
+            let mut active_project = p.into_active_model();
+            active_project.deleted_at = Set(Some(chrono::Utc::now().naive_utc()));
+            active_project.update(&db).await?;
 
-    Ok(Json(serde_json::json!({
-        "message": "Project deleted successfully"
-    })))
+            println!("Project | DELETE /projects/{} | user={} | res=200", project_id, auth_user.username);
+            Ok(Json(serde_json::json!({
+                "message": "Project deleted successfully"
+            })))
+        }
+        None => {
+            println!("Project | DELETE /projects/{} | user={} | res=404 | Project not found", project_id, auth_user.username);
+            Err(AppError::NotFound("Project not found".to_string()))
+        }
+    }
 }

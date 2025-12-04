@@ -78,10 +78,10 @@ impl From<user::Model> for UserResponse {
 )]
 pub async fn create_user(
     State(db): State<DatabaseConnection>,
-    axum::Extension(_auth_user): axum::Extension<AuthUser>,
+    axum::Extension(auth_user): axum::Extension<AuthUser>,
     Json(payload): Json<CreateUserRequest>,
 ) -> Result<(StatusCode, Json<UserResponse>), AppError> {
-    println!("Create user request for: {}", payload.username);
+
 
     // Hash password
     let salt = SaltString::generate(&mut OsRng);
@@ -106,7 +106,7 @@ pub async fn create_user(
 
     match user.insert(&db).await {
         Ok(created_user) => {
-            println!("User '{}' created successfully", created_user.username);
+            println!("User | POST /users | user={} | created={} | res=201", auth_user.username, created_user.username);
             Ok((StatusCode::CREATED, Json(UserResponse::from(created_user))))
         }
         Err(e) => {
@@ -139,7 +139,7 @@ pub async fn list_users(
     _auth_user: axum::Extension<AuthUser>,
     Query(pagination): Query<Pagination>,
 ) -> Result<Json<PaginatedResponse<UserResponse>>, AppError> {
-    println!("List users request");
+
 
     let page = pagination.page.unwrap_or(1);
     let limit = pagination.limit.unwrap_or(10);
@@ -153,6 +153,7 @@ pub async fn list_users(
 
     let user_responses: Vec<UserResponse> = users.into_iter().map(UserResponse::from).collect();
     
+    println!("User | GET /users | user={} | count={} | res=200", _auth_user.username, total_items);
     Ok(Json(PaginatedResponse::new(user_responses, total_items, page, limit)))
 }
 
@@ -178,21 +179,28 @@ pub async fn delete_user(
     axum::Extension(auth_user): axum::Extension<AuthUser>,
     Path(user_id): Path<Uuid>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    println!("Delete user request for ID: {}", user_id);
 
     // Prevent deleting self
     if auth_user.id == user_id {
+        println!("User | DELETE /users/{} | user={} | res=400 | Cannot delete yourself", user_id, auth_user.username);
         return Err(AppError::BadRequest("Cannot delete yourself".to_string()));
     }
 
     let user = User::find_by_id(user_id)
         .one(&db)
-        .await?
-        .ok_or(AppError::NotFound("User not found".to_string()))?;
-
-    user.delete(&db).await?;
-
-    Ok(Json(serde_json::json!({
-        "message": "User deleted successfully"
-    })))
+        .await?;
+    
+    match user {
+        Some(user) => {
+            user.delete(&db).await?;
+            println!("User | DELETE /users/{} | user={} | res=200", user_id, auth_user.username);
+            Ok(Json(serde_json::json!({
+                "message": "User deleted successfully"
+            })))
+        }
+        None => {
+            println!("User | DELETE /users/{} | user={} | res=404 | User not found", user_id, auth_user.username);
+            Err(AppError::NotFound("User not found".to_string()))
+        }
+    }
 }

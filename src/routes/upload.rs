@@ -6,7 +6,7 @@ use axum::{
 use sea_orm::{ActiveModelTrait, DatabaseConnection, Set};
 use serde::Serialize;
 use uuid::Uuid;
-use crate::entities::file;
+use crate::entities::{file, job};
 use crate::error::AppError;
 use crate::middleware::api_key::ProjectContext;
 use crate::services::s3::S3Service;
@@ -123,6 +123,7 @@ pub async fn upload_file(
                 format!("https://{}.s3.{}.amazonaws.com/{}", s3_service.bucket_name, config.aws_region, s3_key)
             };
 
+            println!("Upload | POST /upload/file | project={} | file={} | res=200", project.name, saved_file.filename);
             return Ok(Json(FileUploadResponse {
                 id: saved_file.id,
                 url,
@@ -133,6 +134,7 @@ pub async fn upload_file(
         }
     }
     
+    println!("Upload | POST /upload/file | project={} | res=400 | No file field found", project.name);
     Err(AppError::BadRequest("No file field found".to_string()))
 }
 
@@ -165,6 +167,7 @@ pub async fn upload_image(
             
             // Basic validation for image type
             if !content_type.starts_with("image/") {
+                println!("Upload | POST /upload/image | project={} | res=400 | File is not an image", project.name);
                 return Err(AppError::BadRequest("File is not an image".to_string()));
             }
 
@@ -228,7 +231,21 @@ pub async fn upload_image(
                 updated_at: Set(chrono::Utc::now().naive_utc()),
             };
 
-            file.insert(&db).await.map_err(AppError::DatabaseError)?;
+            let saved_file = file.insert(&db).await.map_err(AppError::DatabaseError)?;
+
+            // Create Image Processing Job
+            let job = job::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                file_id: Set(saved_file.id),
+                status: Set("pending".to_string()),
+                payload: Set(serde_json::json!({
+                    "variants": project.settings.variants
+                })),
+                created_at: Set(chrono::Utc::now().naive_utc()),
+                updated_at: Set(chrono::Utc::now().naive_utc()),
+            };
+
+            job.insert(&db).await.map_err(AppError::DatabaseError)?;
 
             // Construct URL
             let config = crate::config::get_config();
@@ -238,6 +255,7 @@ pub async fn upload_image(
                 format!("https://{}.s3.{}.amazonaws.com/{}", s3_service.bucket_name, config.aws_region, s3_key)
             };
 
+            println!("Upload | POST /upload/image | project={} | file={} | res=200", project.name, file_id);
             return Ok(Json(ImageUploadResponse {
                 id: file_id,
                 original_url: url,
@@ -246,5 +264,6 @@ pub async fn upload_image(
         }
     }
 
+    println!("Upload | POST /upload/image | project={} | res=400 | No file field found", project.name);
     Err(AppError::BadRequest("No file field found".to_string()))
 }

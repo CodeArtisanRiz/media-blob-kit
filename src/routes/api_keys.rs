@@ -78,41 +78,47 @@ pub async fn create_api_key(
     Path(project_id): Path<Uuid>,
     Json(payload): Json<CreateApiKeyRequest>,
 ) -> Result<Json<ApiKeyResponse>, AppError> {
-    println!("Create API key request for project: {}", project_id);
-
     // Verify project ownership
     let project = project::Entity::find_by_id(project_id)
         .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
         .one(&db)
-        .await?
-        .ok_or(AppError::NotFound("Project not found".to_string()))?;
+        .await?;
 
-    // Generate API Key
-    let mut key_bytes = [0u8; 32];
-    thread_rng().fill_bytes(&mut key_bytes);
-    let raw_key = format!("mbk_{}", general_purpose::URL_SAFE_NO_PAD.encode(key_bytes));
+    match project {
+        Some(p) => {
+            // Generate API Key
+            let mut key_bytes = [0u8; 32];
+            thread_rng().fill_bytes(&mut key_bytes);
+            let raw_key = format!("mbk_{}", general_purpose::URL_SAFE_NO_PAD.encode(key_bytes));
 
-    // Hash API Key
-    let mut hasher = Sha256::new();
-    hasher.update(raw_key.as_bytes());
-    let key_hash = format!("{:x}", hasher.finalize());
+            // Hash API Key
+            let mut hasher = Sha256::new();
+            hasher.update(raw_key.as_bytes());
+            let key_hash = format!("{:x}", hasher.finalize());
 
-    let api_key = api_key::ActiveModel {
-        id: Set(Uuid::new_v4()),
-        project_id: Set(project.id),
-        name: Set(payload.name),
-        key_hash: Set(key_hash),
-        created_at: Set(chrono::Utc::now().naive_utc()),
-        expires_at: Set(payload.expires_at),
-        is_active: Set(true),
-    };
+            let api_key = api_key::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                project_id: Set(p.id),
+                name: Set(payload.name),
+                key_hash: Set(key_hash),
+                created_at: Set(chrono::Utc::now().naive_utc()),
+                expires_at: Set(payload.expires_at),
+                is_active: Set(true),
+            };
 
-    let created_key = api_key.insert(&db).await?;
+            let created_key = api_key.insert(&db).await?;
 
-    let mut response = ApiKeyResponse::from(created_key);
-    response.key = Some(raw_key);
-    Ok(Json(response))
+            let mut response = ApiKeyResponse::from(created_key);
+            response.key = Some(raw_key);
+            println!("ApiKey | POST /projects/{}/keys | user={} | res=201", project_id, auth_user.username);
+            Ok(Json(response))
+        }
+        None => {
+            println!("ApiKey | POST /projects/{}/keys | user={} | res=404 | Project not found", project_id, auth_user.username);
+            Err(AppError::NotFound("Project not found".to_string()))
+        }
+    }
 }
 
 #[utoipa::path(
@@ -138,8 +144,6 @@ pub async fn list_api_keys(
     Path(project_id): Path<Uuid>,
     Query(pagination): Query<Pagination>,
 ) -> Result<Json<PaginatedResponse<ApiKeyResponse>>, AppError> {
-    println!("List API keys request for project: {}", project_id);
-
     // Verify project ownership
     let project = project::Entity::find_by_id(project_id)
         .filter(project::Column::OwnerId.eq(auth_user.id))
@@ -149,6 +153,7 @@ pub async fn list_api_keys(
         .map_err(AppError::DatabaseError)?;
 
     if project.is_none() {
+        println!("ApiKey | GET /projects/{}/keys | user={} | res=404 | Project not found", project_id, auth_user.username);
         return Err(AppError::NotFound("Project not found".to_string()));
     }
 
@@ -165,6 +170,7 @@ pub async fn list_api_keys(
 
     let responses: Vec<ApiKeyResponse> = api_keys.into_iter().map(ApiKeyResponse::from).collect();
     
+    println!("ApiKey | GET /projects/{}/keys | user={} | count={} | res=200", project_id, auth_user.username, total_items);
     Ok(Json(PaginatedResponse::new(responses, total_items, page, limit)))
 }
 
@@ -192,30 +198,40 @@ pub async fn update_api_key(
     Path((project_id, key_id)): Path<(Uuid, Uuid)>,
     Json(payload): Json<UpdateApiKeyRequest>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    println!("Update API key request for project: {}, key: {}", project_id, key_id);
-
     // Verify project ownership
     let project = project::Entity::find_by_id(project_id)
         .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
         .one(&db)
-        .await?
-        .ok_or(AppError::NotFound("Project not found".to_string()))?;
+        .await?;
 
-    let key = api_key::Entity::find_by_id(key_id)
-        .filter(api_key::Column::ProjectId.eq(project.id))
-        .one(&db)
-        .await?
-        .ok_or(AppError::NotFound("API Key not found".to_string()))?;
+    match project {
+        Some(p) => {
+            let key = api_key::Entity::find_by_id(key_id)
+                .filter(api_key::Column::ProjectId.eq(p.id))
+                .one(&db)
+                .await?;
 
-    let mut active_key = key.into_active_model();
-    active_key.is_active = Set(payload.is_active);
+            match key {
+                Some(k) => {
+                    let mut active_key = k.into_active_model();
+                    active_key.is_active = Set(payload.is_active);
+                    active_key.update(&db).await?;
 
-    active_key.update(&db).await?;
-
-    Ok(Json(serde_json::json!({
-        "message": "API Key updated successfully"
-    })))
+                    println!("ApiKey | PATCH /projects/{}/keys/{} | user={} | res=200", project_id, key_id, auth_user.username);
+                    Ok(Json(serde_json::json!({ "message": "API Key updated successfully" })))
+                }
+                None => {
+                    println!("ApiKey | PATCH /projects/{}/keys/{} | user={} | res=404 | API Key not found", project_id, key_id, auth_user.username);
+                    Err(AppError::NotFound("API Key not found".to_string()))
+                }
+            }
+        }
+        None => {
+            println!("ApiKey | PATCH /projects/{}/keys/{} | user={} | res=404 | Project not found", project_id, key_id, auth_user.username);
+            Err(AppError::NotFound("Project not found".to_string()))
+        }
+    }
 }
 
 #[utoipa::path(
@@ -240,25 +256,36 @@ pub async fn delete_api_key(
     auth_user: axum::Extension<AuthUser>,
     Path((project_id, key_id)): Path<(Uuid, Uuid)>,
 ) -> Result<Json<serde_json::Value>, AppError> {
-    println!("Delete API key request for project: {}, key: {}", project_id, key_id);
-
     // Verify project ownership
     let project = project::Entity::find_by_id(project_id)
         .filter(project::Column::OwnerId.eq(auth_user.id))
         .filter(project::Column::DeletedAt.is_null())
         .one(&db)
-        .await?
-        .ok_or(AppError::NotFound("Project not found".to_string()))?;
+        .await?;
 
-    let key = api_key::Entity::find_by_id(key_id)
-        .filter(api_key::Column::ProjectId.eq(project.id))
-        .one(&db)
-        .await?
-        .ok_or(AppError::NotFound("API Key not found".to_string()))?;
+    match project {
+        Some(p) => {
+            let key = api_key::Entity::find_by_id(key_id)
+                .filter(api_key::Column::ProjectId.eq(p.id))
+                .one(&db)
+                .await?;
 
-    api_key::Entity::delete(key.into_active_model()).exec(&db).await?;
+            match key {
+                Some(k) => {
+                    api_key::Entity::delete(k.into_active_model()).exec(&db).await?;
 
-    Ok(Json(serde_json::json!({
-        "message": "API Key deleted successfully"
-    })))
+                    println!("ApiKey | DELETE /projects/{}/keys/{} | user={} | res=200", project_id, key_id, auth_user.username);
+                    Ok(Json(serde_json::json!({ "message": "API Key deleted successfully" })))
+                }
+                None => {
+                    println!("ApiKey | DELETE /projects/{}/keys/{} | user={} | res=404 | API Key not found", project_id, key_id, auth_user.username);
+                    Err(AppError::NotFound("API Key not found".to_string()))
+                }
+            }
+        }
+        None => {
+            println!("ApiKey | DELETE /projects/{}/keys/{} | user={} | res=404 | Project not found", project_id, key_id, auth_user.username);
+            Err(AppError::NotFound("Project not found".to_string()))
+        }
+    }
 }
