@@ -81,23 +81,23 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
 ## Phase 5: File Upload & S3 Integration
 **Goal**: Implement secure file uploads to S3 using API Key authentication.
 
-- [ ] **S3 Integration**
-    - [ ] Setup AWS SDK (`aws-sdk-s3`).
-    - [ ] Create a helper service for S3 operations (upload, delete, presign).
-- [ ] **File Models**
-    - [ ] Create migration for `files` table (id, project_id, s3_key, filename, mime_type, size, status, variants_json).
-- [ ] **Upload API (API Key Auth)**
-    - [ ] Implement API Key middleware to resolve `project_id` from header.
-    - [ ] `POST /upload/file`: Standard file upload.
-        - [ ] Validates API Key.
-        - [ ] Uploads file to S3 (`{projectId}/files/{fileId}.{ext}`).
-        - [ ] Returns public URL immediately.
-    - [ ] `POST /upload/image`: Image upload with processing.
-        - [ ] Validates API Key.
-        - [ ] Uploads original image to S3.
-        - [ ] Calculates future variant paths (e.g., thumbnail, medium).
-        - [ ] Returns JSON with original URL and *future* variant URLs.
-        - [ ] Enqueues `ImageProcessingJob`.
+- [x] **S3 Integration**
+    - [x] Setup AWS SDK (`aws-sdk-s3`).
+    - [x] Create a helper service for S3 operations (upload, delete, presign).
+- [x] **File Models**
+    - [x] Create migration for `files` table (id, project_id, s3_key, filename, mime_type, size, status, variants_json).
+- [x] **Upload API (API Key Auth)**
+    - [x] Implement API Key middleware to resolve `project_id` from header.
+    - [x] `POST /upload/file`: Standard file upload.
+        - [x] Validates API Key.
+        - [x] Uploads file to S3 (`{projectId}/files/{fileId}.{ext}`).
+        - [x] Returns public URL immediately.
+    - [x] `POST /upload/image`: Image upload with processing.
+        - [x] Validates API Key.
+        - [x] Uploads original image to S3.
+        - [x] Calculates future variant paths (e.g., thumbnail, medium).
+        - [x] Returns JSON with original URL and *future* variant URLs.
+        - [x] Enqueues `ImageProcessingJob`.
 
 ## Phase 6: Asynchronous Image Processing
 **Goal**: Handle image resizing and optimization in the background.

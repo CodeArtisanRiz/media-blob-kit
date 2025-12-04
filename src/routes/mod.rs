@@ -3,6 +3,7 @@ mod auth;
 mod users;
 mod projects;
 mod api_keys;
+pub mod upload;
 
 use axum::{
     routing::{get, post, delete},
@@ -41,6 +42,9 @@ use utoipa_swagger_ui::SwaggerUi;
         api_keys::list_api_keys,
         api_keys::update_api_key,
         api_keys::delete_api_key,
+        // Upload endpoints
+        upload::upload_file,
+        upload::upload_image,
     ),
     components(
         schemas(
@@ -68,6 +72,9 @@ use utoipa_swagger_ui::SwaggerUi;
             api_keys::CreateApiKeyRequest,
             api_keys::UpdateApiKeyRequest,
             api_keys::ApiKeyResponse,
+            // Upload schemas
+            upload::FileUploadResponse,
+            upload::ImageUploadResponse,
         )
     ),
     tags(
@@ -75,7 +82,8 @@ use utoipa_swagger_ui::SwaggerUi;
         (name = "Authentication", description = "Authentication endpoints for login, token refresh, and logout"),
         (name = "User Management", description = "User management endpoints (superuser access required)"),
         (name = "Project Management", description = "Project management endpoints"),
-        (name = "Project API Keys", description = "API Key management endpoints")
+        (name = "Project API Keys", description = "API Key management endpoints"),
+        (name = "File Upload", description = "File and Image upload endpoints")
     ),
     info(
         title = "MediaBlobKit API",
@@ -97,6 +105,14 @@ impl utoipa::Modify for SecurityAddon {
             utoipa::openapi::security::SecurityScheme::Http(
                 utoipa::openapi::security::Http::new(
                     utoipa::openapi::security::HttpAuthScheme::Bearer
+                )
+            ),
+        );
+        components.add_security_scheme(
+            "api_key",
+            utoipa::openapi::security::SecurityScheme::ApiKey(
+                utoipa::openapi::security::ApiKey::Header(
+                    utoipa::openapi::security::ApiKeyValue::new("x-api-key")
                 )
             ),
         );
@@ -139,6 +155,12 @@ pub fn create_routes(db: DatabaseConnection) -> Router {
         .route("/auth/logout", post(auth::logout))
         .merge(protected_routes)
         .merge(su_routes)
+        .merge(
+            Router::new()
+                .route("/upload/file", post(upload::upload_file))
+                .route("/upload/image", post(upload::upload_image))
+                .layer(axum::middleware::from_fn_with_state(db.clone(), crate::middleware::api_key::api_key_auth))
+        )
         .with_state(db);
     
     // Merge Swagger UI (which has no state) with the rest

@@ -1,0 +1,250 @@
+use axum::{
+    extract::{Multipart, State},
+    response::Json,
+    Extension,
+};
+use sea_orm::{ActiveModelTrait, DatabaseConnection, Set};
+use serde::Serialize;
+use uuid::Uuid;
+use crate::entities::file;
+use crate::error::AppError;
+use crate::middleware::api_key::ProjectContext;
+use crate::services::s3::S3Service;
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct FileUploadResponse {
+    id: Uuid,
+    url: String,
+    filename: String,
+    mime_type: String,
+    size: i64,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct ImageUploadResponse {
+    id: Uuid,
+    original_url: String,
+    variants: serde_json::Value,
+}
+
+// Helper to get file extension
+fn get_extension(filename: &str) -> String {
+    std::path::Path::new(filename)
+        .extension()
+        .and_then(std::ffi::OsStr::to_str)
+        .unwrap_or("bin")
+        .to_string()
+}
+
+#[utoipa::path(
+    post,
+    path = "/upload/file",
+    tag = "File Upload",
+    request_body(content = Vec<u8>, content_type = "multipart/form-data"),
+    responses(
+        (status = 200, description = "File uploaded successfully", body = FileUploadResponse),
+        (status = 400, description = "Bad Request"),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    security(
+        ("api_key" = [])
+    )
+)]
+// Helper to sanitize bucket name
+fn sanitize_bucket_name(name: &str) -> String {
+    name.to_lowercase()
+        .chars()
+        .map(|c| if c.is_alphanumeric() { c } else { '-' })
+        .collect::<String>()
+}
+
+#[utoipa::path(
+    post,
+    path = "/upload/file",
+    tag = "File Upload",
+    request_body(content = Vec<u8>, content_type = "multipart/form-data"),
+    responses(
+        (status = 200, description = "File uploaded successfully", body = FileUploadResponse),
+        (status = 400, description = "Bad Request"),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    security(
+        ("api_key" = [])
+    )
+)]
+pub async fn upload_file(
+    State(db): State<DatabaseConnection>,
+    Extension(project): Extension<ProjectContext>,
+    mut multipart: Multipart,
+) -> Result<Json<FileUploadResponse>, AppError> {
+    let s3_service = S3Service::new().await;
+    
+    while let Some(field) = multipart.next_field().await.map_err(|_| AppError::BadRequest("Invalid multipart data".to_string()))? {
+        if field.name() == Some("file") {
+            let filename = field.file_name().unwrap_or("unknown").to_string();
+            let content_type = field.content_type().unwrap_or("application/octet-stream").to_string();
+            let data = field.bytes().await.map_err(|_| AppError::InternalServerError("Failed to read file bytes".to_string()))?;
+            let size = data.len() as i64;
+            let ext = get_extension(&filename);
+            
+            let file_id = Uuid::new_v4();
+            // Format: {project_name}-{project_id}/files/{file_id}.{ext}
+            let s3_key = format!("{}-{}/files/{}.{}", sanitize_bucket_name(&project.name), project.id, file_id, ext);
+            
+            // Ensure bucket exists
+            s3_service.ensure_bucket_exists().await?;
+
+            // Upload to S3
+            s3_service.put_object(&s3_key, data.to_vec(), &content_type).await?;
+            
+            // Save to DB
+            let file = file::ActiveModel {
+                id: Set(file_id),
+                project_id: Set(project.id),
+                s3_key: Set(s3_key.clone()),
+                filename: Set(filename.clone()),
+                mime_type: Set(content_type.clone()),
+                size: Set(size),
+                status: Set("ready".to_string()),
+                variants_json: Set(serde_json::json!({})),
+                created_at: Set(chrono::Utc::now().naive_utc()),
+                updated_at: Set(chrono::Utc::now().naive_utc()),
+            };
+            
+            let saved_file = file.insert(&db).await.map_err(AppError::DatabaseError)?;
+            
+            // Construct URL
+            let config = crate::config::get_config();
+            let url = if let Some(endpoint) = &config.s3_endpoint {
+                format!("{}/{}/{}", endpoint, s3_service.bucket_name, s3_key)
+            } else {
+                format!("https://{}.s3.{}.amazonaws.com/{}", s3_service.bucket_name, config.aws_region, s3_key)
+            };
+
+            return Ok(Json(FileUploadResponse {
+                id: saved_file.id,
+                url,
+                filename: saved_file.filename,
+                mime_type: saved_file.mime_type,
+                size: saved_file.size,
+            }));
+        }
+    }
+    
+    Err(AppError::BadRequest("No file field found".to_string()))
+}
+
+#[utoipa::path(
+    post,
+    path = "/upload/image",
+    tag = "File Upload",
+    request_body(content = Vec<u8>, content_type = "multipart/form-data"),
+    responses(
+        (status = 200, description = "Image uploaded successfully", body = ImageUploadResponse),
+        (status = 400, description = "Bad Request"),
+        (status = 401, description = "Unauthorized"),
+        (status = 500, description = "Internal Server Error")
+    ),
+    security(
+        ("api_key" = [])
+    )
+)]
+pub async fn upload_image(
+    State(db): State<DatabaseConnection>,
+    Extension(project): Extension<ProjectContext>,
+    mut multipart: Multipart,
+) -> Result<Json<ImageUploadResponse>, AppError> {
+    let s3_service = S3Service::new().await;
+
+    while let Some(field) = multipart.next_field().await.map_err(|_| AppError::BadRequest("Invalid multipart data".to_string()))? {
+        if field.name() == Some("file") {
+            let filename = field.file_name().unwrap_or("unknown").to_string();
+            let content_type = field.content_type().unwrap_or("application/octet-stream").to_string();
+            
+            // Basic validation for image type
+            if !content_type.starts_with("image/") {
+                return Err(AppError::BadRequest("File is not an image".to_string()));
+            }
+
+            let data = field.bytes().await.map_err(|_| AppError::InternalServerError("Failed to read file bytes".to_string()))?;
+            let size = data.len() as i64;
+            let ext = get_extension(&filename);
+
+            let file_id = Uuid::new_v4();
+            // Format: {project_name}-{project_id}/images/original/{file_id}.{ext}
+            let s3_key = format!("{}-{}/images/original/{}.{}", sanitize_bucket_name(&project.name), project.id, file_id, ext);
+
+            // Ensure bucket exists
+            s3_service.ensure_bucket_exists().await?;
+
+            // Upload Original to S3
+            s3_service.put_object(&s3_key, data.to_vec(), &content_type).await?;
+
+            // Calculate future variant URLs
+            let mut variants_map = serde_json::Map::new();
+            
+            if let Some(variants_config) = &project.settings.variants {
+                for (variant_name, config) in variants_config {
+                    // Determine extension for variant
+                    let variant_ext = config.format.as_deref().unwrap_or(&ext);
+                    let variant_ext = if variant_ext == "original" { &ext } else { variant_ext };
+                    
+                    // Format: {project_name}-{project_id}/images/{variant_name}/{file_id}.{ext}
+                    let variant_key = format!("{}-{}/images/{}/{}.{}", 
+                        sanitize_bucket_name(&project.name), 
+                        project.id, 
+                        variant_name, 
+                        file_id, 
+                        variant_ext
+                    );
+
+                    // Construct URL
+                    let config = crate::config::get_config();
+                    let variant_url = if let Some(endpoint) = &config.s3_endpoint {
+                        format!("{}/{}/{}", endpoint, s3_service.bucket_name, variant_key)
+                    } else {
+                        format!("https://{}.s3.{}.amazonaws.com/{}", s3_service.bucket_name, config.aws_region, variant_key)
+                    };
+                    
+                    variants_map.insert(variant_name.clone(), serde_json::Value::String(variant_url));
+                }
+            }
+            
+            let variants = serde_json::Value::Object(variants_map);
+
+            // Save to DB
+            let file = file::ActiveModel {
+                id: Set(file_id),
+                project_id: Set(project.id),
+                s3_key: Set(s3_key.clone()),
+                filename: Set(filename),
+                mime_type: Set(content_type),
+                size: Set(size),
+                status: Set("processing".to_string()), // Mark as processing for Phase 6 worker
+                variants_json: Set(variants.clone()),
+                created_at: Set(chrono::Utc::now().naive_utc()),
+                updated_at: Set(chrono::Utc::now().naive_utc()),
+            };
+
+            file.insert(&db).await.map_err(AppError::DatabaseError)?;
+
+            // Construct URL
+            let config = crate::config::get_config();
+            let url = if let Some(endpoint) = &config.s3_endpoint {
+                format!("{}/{}/{}", endpoint, s3_service.bucket_name, s3_key)
+            } else {
+                format!("https://{}.s3.{}.amazonaws.com/{}", s3_service.bucket_name, config.aws_region, s3_key)
+            };
+
+            return Ok(Json(ImageUploadResponse {
+                id: file_id,
+                original_url: url,
+                variants,
+            }));
+        }
+    }
+
+    Err(AppError::BadRequest("No file field found".to_string()))
+}
