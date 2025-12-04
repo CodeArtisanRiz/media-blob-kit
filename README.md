@@ -389,6 +389,7 @@ All user management endpoints require superuser authentication.
 
 -   **`PUT /projects/{id}`** - Update project
     -   **Headers:** `Authorization: Bearer <access_token>`
+    -   **Note:** Currently, updating `image_variants` in settings does *not* automatically reprocess existing files. In the future, this will trigger a background job to sync variants.
 
 -   **`DELETE /projects/{id}`** - Delete project (Soft delete)
     -   **Headers:** `Authorization: Bearer <access_token>`

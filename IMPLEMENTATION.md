@@ -60,6 +60,11 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [x] `PATCH /projects/:id/keys/:key_id`: Enable/Disable an API key.
     - [x] `DELETE /projects/:id/keys/:key_id`: Permanently delete an API key.
 
+> [!NOTE]
+> **Future Improvement**: When updating project settings via `PUT /projects/:id`, if the `image_variants` configuration changes, we need to trigger a background job to:
+> 1. Generate missing variants for existing images (if a new variant is added).
+> 2. Delete obsolete variants (if a variant is removed).
+
 ## Phase 4: Core Improvements & Refactoring
 **Goal**: Enhance code quality, performance, and standard features.
 
@@ -74,17 +79,25 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [x] Centralize configuration management.
 
 ## Phase 5: File Upload & S3 Integration
-**Goal**: Implement generic file uploads to S3.
+**Goal**: Implement secure file uploads to S3 using API Key authentication.
 
 - [ ] **S3 Integration**
     - [ ] Setup AWS SDK (`aws-sdk-s3`).
     - [ ] Create a helper service for S3 operations (upload, delete, presign).
 - [ ] **File Models**
-    - [ ] Create migration for `files` table (id, project_id, s3_key, filename, mime_type, size, status).
-- [ ] **Upload API**
-    - [ ] `POST /projects/:id/upload`: Multipart upload handler.
-    - [ ] Stream file to S3 bucket under `{projectId}/files/{fileId}.{ext}`.
-    - [ ] Record metadata in DB.
+    - [ ] Create migration for `files` table (id, project_id, s3_key, filename, mime_type, size, status, variants_json).
+- [ ] **Upload API (API Key Auth)**
+    - [ ] Implement API Key middleware to resolve `project_id` from header.
+    - [ ] `POST /upload/file`: Standard file upload.
+        - [ ] Validates API Key.
+        - [ ] Uploads file to S3 (`{projectId}/files/{fileId}.{ext}`).
+        - [ ] Returns public URL immediately.
+    - [ ] `POST /upload/image`: Image upload with processing.
+        - [ ] Validates API Key.
+        - [ ] Uploads original image to S3.
+        - [ ] Calculates future variant paths (e.g., thumbnail, medium).
+        - [ ] Returns JSON with original URL and *future* variant URLs.
+        - [ ] Enqueues `ImageProcessingJob`.
 
 ## Phase 6: Asynchronous Image Processing
 **Goal**: Handle image resizing and optimization in the background.
@@ -95,10 +108,11 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
 - [ ] **Worker Service**
     - [ ] Create a background worker that polls/listens for jobs.
     - [ ] Implement image processing using `image` crate (resize, format conversion).
-    - [ ] Upload generated variants to S3 (`{projectId}/{variant}/{fileId}.{ext}`).
+    - [ ] Fetch original from S3, generate variants.
+    - [ ] Upload generated variants to S3 (matching the paths returned in Phase 5).
     - [ ] Update file status in DB to "ready".
 - [ ] **Integration**
-    - [ ] Trigger a job upon successful image upload in Phase 4.
+    - [ ] Trigger a job upon successful image upload in Phase 5.
 
 ## Phase 7: File Retrieval & Serving
 **Goal**: Serve files and specific image variants.
