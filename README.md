@@ -65,6 +65,7 @@ The server will start on `http://0.0.0.0:3000`.
 MediaBlobKit is a Rust-based web application built with Axum, SeaORM, and PostgreSQL. It's designed to be a media blob management system with user authentication and role-based access control.
 
 ## 🏗️ Project Structure
+```text
 media-blob-kit/
 ├── src/
 │   ├── main.rs                 # App entry point with CLI commands
@@ -114,6 +115,7 @@ media-blob-kit/
 ├── Cargo.toml                  # Project dependencies
 ├── IMPLEMENTATION.md           # Comprehensive roadmap
 └── README.md                   # User documentation
+```
 ## 🔧 Current Features (Implemented)
 
 ### Database Management
@@ -274,19 +276,23 @@ The [`IMPLEMENTATION.md`](IMPLEMENTATION.md) file outlines a comprehensive 10-ph
 - ✅ Completed: Image resizing and optimization
 - ✅ Completed: Variant generation and storage
 
-**Phase 8: File Retrieval & Serving**
+**Phase 8: Parallel Job Processing**
+- ⏳ Pending: Configurable concurrency (env driven)
+- ⏳ Pending: Semaphore-based parallel execution
+
+**Phase 9: File Retrieval & Serving**
 - ⏳ Pending: File metadata and URL endpoints
 - ⏳ Pending: S3 presigned URLs or proxy
 - ⏳ Pending: Image variant serving
 - ⏳ Pending: Lazy processing for on-demand variants
 
-**Phase 9: Cleanup & Advanced Features**
+**Phase 10: Cleanup & Advanced Features**
 - ⏳ Pending: Hard and cascade delete logic
 - ⏳ Pending: Scheduled cleanup jobs
 - ⏳ Pending: Orphaned S3 object cleanup
 - ⏳ Pending: API key generation for programmatic uploads
 
-**Phase 10: API Documentation**
+**Phase 11: API Documentation**
 - ✅ Completed: OpenAPI Integration
 - ✅ Completed: Endpoint Documentation
 - ✅ Completed: Swagger UI

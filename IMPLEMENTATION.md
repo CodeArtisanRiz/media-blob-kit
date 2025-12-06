@@ -137,16 +137,28 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
 - [x] **Integration**: Automatic job creation on upload.
 - [x] **Worker Recovery**: Automatic reset of stale 'processing' jobs on startup.
 
-## Phase 8: File Retrieval & Serving
+## Phase 8: Parallel Job Processing
+**Goal**: Increase throughput by processing multiple jobs concurrently within a single worker instance.
+
+- [ ] **Configuration**
+    - [ ] Add `WORKER_CONCURRENCY` env var (default to 1).
+    - [ ] Update `Config` struct.
+- [ ] **Concurrency Logic**
+    - [ ] Use `tokio::sync::Semaphore` to limit concurrent jobs.
+    - [ ] Spawn distinct tasks for each job `handle_job` call.
+    - [ ] Ensure database connections are efficiently managed using the pool.
+
+## Phase 9: File Retrieval & Serving
 **Goal**: Serve files and specific image variants.
 
 - [ ] **Retrieval API**
+    - [ ] `GET /files`: List all files (Paginated, query param `?project_id=<id>`).
     - [ ] `GET /files/:id`: Get file metadata and public URL.
     - [ ] `GET /files/:id/content`: Redirect to S3 presigned URL or proxy content.
     - [ ] Support query params for variants (e.g., `?variant=thumbnail`).
     - [ ] Implement "Lazy Processing": If variant doesn't exist, trigger job and return original/placeholder.
 
-## Phase 9: Cleanup & Advanced Features
+## Phase 10: Cleanup & Advanced Features
 **Goal**: Maintenance tasks and polish.
 
 - [ ] **Deletion Logic**
@@ -156,7 +168,7 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [ ] Scheduled job to remove "soft deleted" items after X days.
     - [ ] Scheduled job to clean orphaned S3 objects.
 
-## Phase 10: API Documentation
+## Phase 11: API Documentation
 **Goal**: Provide interactive API documentation via Swagger/OpenAPI.
 
 - [x] **OpenAPI Integration**
