@@ -2,7 +2,7 @@
 
 This document outlines the step-by-step implementation plan for the MediaBlobKit project.
 
-## Phase 1: Foundation & Infrastructure Setup
+## Phase 1: Foundation & Infrastructure Setup [Completed]
 **Goal**: Set up the core application structure, database connection, and configuration.
 
 - [x] **Project Configuration**
@@ -17,7 +17,7 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [x] Log all requests with user/project context
     - [x] Log all errors (4xx, 5xx) with full context
 
-## Phase 2: Authentication & User Management
+## Phase 2: Authentication & User Management [Completed]
 **Goal**: Implement secure user login and user creation by superusers only.
 
 - [x] **User Models & Migrations**
@@ -45,7 +45,7 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
 **JWT Token Limitation**: Access tokens are stateless JWTs with 15-minute expiration. When a user logs out, the refresh token is immediately revoked, but the access token remains valid until expiration (up to 15 minutes). This is standard JWT behavior. For immediate token revocation, a Redis-based token blacklist can be implemented in the future.
 
 
-## Phase 3: Project Management
+## Phase 3: Project Management [Completed]
 **Goal**: Allow users to create and manage projects with specific settings.
 
 - [x] **Project Models & Migrations**
@@ -67,7 +67,7 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
 > 1. Generate missing variants for existing images (if a new variant is added).
 > 2. Delete obsolete variants (if a variant is removed).
 
-## Phase 4: Core Improvements & Refactoring
+## Phase 4: Core Improvements & Refactoring [Completed]
 **Goal**: Enhance code quality, performance, and standard features.
 
 - [x] **Pagination**
@@ -127,20 +127,15 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
         - Admin: View owned projects.
     - [x] Support pagination per project.
 
-## Phase 7: Asynchronous Image Processing
+## Phase 7: Asynchronous Image Processing [Completed]
 **Goal**: Handle image resizing and optimization in the background.
 
-- [x] **Queue System**
-    - [x] Choose a queue backend (DB-backed queue selected).
-    - [x] Define job structure: `ImageProcessingJob` (via `Job` entity).
-- [ ] **Worker Service**
-    - [ ] Create a background worker that polls/listens for jobs.
-    - [ ] Implement image processing using `image` crate (resize, format conversion).
-    - [ ] Fetch original from S3, generate variants.
-    - [ ] Upload generated variants to S3 (matching the paths returned in Phase 5).
-    - [ ] Update file status in DB to "ready".
-- [ ] **Integration**
-    - [ ] Trigger a job upon successful image upload in Phase 5.
+- [x] **Queue System**: DB-backed queue using `jobs` table.
+- [x] **Worker Service**: Background worker polling for jobs.
+- [x] **Image Processing**: Resizing and format conversion (AVIF, WebP).
+- [x] Support for `fit` modes (contain, cover, stretch).
+- [x] **Integration**: Automatic job creation on upload.
+- [x] **Worker Recovery**: Automatic reset of stale 'processing' jobs on startup.
 
 ## Phase 8: File Retrieval & Serving
 **Goal**: Serve files and specific image variants.

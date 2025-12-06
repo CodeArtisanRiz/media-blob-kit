@@ -8,6 +8,20 @@ A high-performance media blob management system built with Rust, Axum, SeaORM, a
 - PostgreSQL
 - AWS S3/S3 Compatible Storage
 
+### Hardware Requirements
+
+| Spec | Minimum | Recommended |
+|------|---------|-------------|
+| **CPU** | 1 vCPU | 2 vCPU (for parallel calls & background worker) |
+| **RAM** | 512 MB | 2 GB (safe buffer for heavy image processing) |
+| **Disk** | Minimal | 10 GB (for OS, logs, and temp buffering) |
+
+**Scaling & Concurrency:**
+- **Per Instance (Sequential)**: A single instance processes one job at a time (sequentially) to ensure predictable CPU usage (avoids freezing the web server).
+- **Horizontal Scaling**: To process multiple jobs in parallel, simply run multiple instances of the application. The `SKIP LOCKED` database queue ensures they distribute the load automatically.
+
+> **Note on Safety**: You can run as many worker instances as you like. We use PostgreSQL's `FOR UPDATE SKIP LOCKED` clause, which guarantees that **no two workers will ever pick up the same job**, even if they query the database at the exact same millisecond.
+
 ## Setup
 
 1.  Create a `.env` file with your DB credentials:
@@ -37,7 +51,11 @@ You will be prompted to enter a password.
 To start the server:
 
 ```bash
+# Development (Fast compilation, slow execution)
 cargo run
+
+# Production / Deployment (Optimized speed for image processing)
+cargo run --release
 ```
 
 The server will start on `http://0.0.0.0:3000`.
@@ -47,7 +65,6 @@ The server will start on `http://0.0.0.0:3000`.
 MediaBlobKit is a Rust-based web application built with Axum, SeaORM, and PostgreSQL. It's designed to be a media blob management system with user authentication and role-based access control.
 
 ## 🏗️ Project Structure
-```
 media-blob-kit/
 ├── src/
 │   ├── main.rs                 # App entry point with CLI commands
@@ -59,25 +76,37 @@ media-blob-kit/
 │   │   ├── user.rs             # User entity
 │   │   ├── refresh_token.rs    # Refresh token entity
 │   │   ├── project.rs          # Project entity
-│   │   └── api_key.rs          # API Key entity
+│   │   ├── api_key.rs          # API Key entity
+│   │   ├── file.rs             # File entity
+│   │   └── job.rs              # Job entity
 │   ├── middleware/             # Auth & authorization middleware
 │   │   ├── mod.rs
 │   │   ├── auth.rs             # JWT authentication middleware
+│   │   ├── api_key.rs          # API Key validation
 │   │   └── role.rs             # Role-based authorization
-│   └── routes/                 # API route handlers
-│       ├── mod.rs              # Route registration
-│       ├── auth.rs             # Auth endpoints
-│       ├── users.rs            # User management
-│       ├── projects.rs         # Project management
-│       ├── api_keys.rs         # API Key management
-│       └── home.rs             # Root HTML page
+│   ├── models/                 # Shared data models
+│   │   ├── mod.rs
+│   │   └── settings.rs         # Project settings models
+│   ├── routes/                 # API route handlers
+│   │   ├── mod.rs              # Route registration
+│   │   ├── auth.rs             # Auth endpoints
+│   │   ├── users.rs            # User management
+│   │   ├── projects.rs         # Project management
+│   │   ├── api_keys.rs         # API Key management
+│   │   ├── upload.rs           # File & Image upload handlers
+│   │   ├── jobs.rs             # Jobs API
+│   │   └── home.rs             # Root HTML page
+│   ├── services/               # core logic services
+│   │   ├── mod.rs
+│   │   ├── s3.rs               # AWS S3 integration
+│   │   └── worker.rs           # Background worker service
+│   └── utils/                  # Helper utilities
+│       ├── mod.rs
+│       └── image_processor.rs  # Image processing logic
 ├── migration/                  # Database migrations
 │   ├── src/
 │   │   ├── lib.rs
-│   │   ├── m20240101_000001_create_user_table.rs
-│   │   ├── m20241201_000002_create_refresh_tokens_table.rs
-│   │   ├── m20241202_000003_create_projects_table.rs
-│   │   └── m20241202_000004_create_api_keys_table.rs
+│   │   └── m*                  # Migration files
 │   └── Cargo.toml
 ├── utils/
 │   └── reset_db.rs             # Database reset utility
@@ -85,7 +114,6 @@ media-blob-kit/
 ├── Cargo.toml                  # Project dependencies
 ├── IMPLEMENTATION.md           # Comprehensive roadmap
 └── README.md                   # User documentation
-```
 ## 🔧 Current Features (Implemented)
 
 ### Database Management
@@ -118,7 +146,8 @@ media-blob-kit/
 - **Public Access**: Automatic public bucket policy configuration.
 - **Image Processing**:
     - Automatic variant path calculation.
-    - Asynchronous resizing (Coming in Phase 6).
+    - Asynchronous resizing and format conversion (AVIF, WebP, JPEG, PNG).
+    - Background worker service for offloading heavy tasks.
 - **Security**:
     - API Key authentication for uploads.
     - UUID-based filenames to prevent collisions and malicious naming.
@@ -196,7 +225,8 @@ Password Hashing: Argon2 0.5.3
 JWT: jsonwebtoken 9.3.0
 Async Runtime: Tokio 1.48.0
 CLI: Clap 4.5.21
-AWS SDK: aws-sdk-s3 1.60.1
+AWS SDK: aws-sdk-s3 1.60.0
+Image Processing: image 0.25.9
 
 ## 🚀 Implementation Roadmap
 
@@ -240,9 +270,9 @@ The [`IMPLEMENTATION.md`](IMPLEMENTATION.md) file outlines a comprehensive 10-ph
 
 **Phase 7: Asynchronous Image Processing**
 - ✅ Completed: Queue system (DB-backed)
-- ⏳ Pending: Background worker service
-- ⏳ Pending: Image resizing and optimization
-- ⏳ Pending: Variant generation and storage
+- ✅ Completed: Background worker service
+- ✅ Completed: Image resizing and optimization
+- ✅ Completed: Variant generation and storage
 
 **Phase 8: File Retrieval & Serving**
 - ⏳ Pending: File metadata and URL endpoints
@@ -440,6 +470,41 @@ All user management endpoints require superuser authentication.
 
 -   **`DELETE /projects/{id}`** - Delete project (Soft delete)
     -   **Headers:** `Authorization: Bearer <access_token>`
+
+#### Image Variant Configuration
+
+You can configure image variants in the `Project` settings. The worker will automatically process uploaded images based on these rules.
+
+**Supported Fit Modes:**
+- `contain` (Default): Resizes to fit within constraints, preserving aspect ratio. No cropping.
+- `cover` / `center-crop`: Resizes to fill constraints, cropping the excess from the center.
+- `fill` / `stretch` / `exact`: Forces exact dimensions, ignoring aspect ratio.
+
+**Example Configuration:**
+
+```json
+{
+  "variants": {
+    "thumb": {
+      "format": "webp",
+      "width": 150,
+      "height": 150,
+      "fit": "cover",
+      "quality": 80
+    },
+    "medium": {
+      "format": "webp",
+      "width": 800
+      // height auto-calculated
+    },
+    "hero-avif": {
+      "format": "avif",
+      "width": 1600,
+      "quality": 70
+    }
+  }
+}
+```
 
 #### API Keys
 

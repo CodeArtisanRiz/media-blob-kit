@@ -65,6 +65,26 @@ impl S3Service {
         Ok(())
     }
 
+    pub async fn get_object(&self, key: &str) -> Result<Vec<u8>, AppError> {
+        let resp = self.client
+            .get_object()
+            .bucket(&self.bucket_name)
+            .key(key)
+            .send()
+            .await
+            .map_err(|e| {
+                eprintln!("S3 Download Error: {:?}", e);
+                AppError::InternalServerError(format!("Failed to download file from S3: {}", e))
+            })?;
+
+        let data = resp.body.collect().await.map_err(|e| {
+             eprintln!("S3 Body Error: {:?}", e);
+             AppError::InternalServerError("Failed to read S3 body".to_string())
+        })?;
+
+        Ok(data.into_bytes().to_vec())
+    }
+
     pub async fn ensure_bucket_exists(&self) -> Result<(), AppError> {
         let resp = self.client.head_bucket().bucket(&self.bucket_name).send().await;
         

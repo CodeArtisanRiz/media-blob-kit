@@ -42,6 +42,19 @@ impl IntoResponse for AppError {
     }
 }
 
+impl std::fmt::Display for AppError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            AppError::DatabaseError(e) => write!(f, "Database error: {}", e),
+            AppError::NotFound(msg) => write!(f, "Not found: {}", msg),
+            AppError::Unauthorized(msg) => write!(f, "Unauthorized: {}", msg),
+            AppError::BadRequest(msg) => write!(f, "Bad request: {}", msg),
+            AppError::InternalServerError(msg) => write!(f, "Internal server error: {}", msg),
+            AppError::Conflict(msg) => write!(f, "Conflict: {}", msg),
+        }
+    }
+}
+
 impl From<sea_orm::DbErr> for AppError {
     fn from(err: sea_orm::DbErr) -> Self {
         AppError::DatabaseError(err)

@@ -6,6 +6,7 @@ mod error;
 mod pagination;
 pub mod services;
 pub mod models;
+pub mod utils;
 
 
 
@@ -86,7 +87,14 @@ async fn main() {
         }
         None => {
             // build our application using the routes module
-            let app = create_routes(db);
+            let app = create_routes(db.clone());
+
+            // Spawn background worker
+            let worker_db = db.clone();
+            tokio::spawn(async move {
+                let worker = services::worker::Worker::new(worker_db).await;
+                worker.run().await;
+            });
 
             // run our app with hyper, listening globally on port 3000
             let listener = tokio::net::TcpListener::bind("0.0.0.0:3000").await.unwrap();
