@@ -153,20 +153,27 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [x] `GET /files/:id/content`: Redirect to S3 presigned URL or proxy content.
         - [x] Support query params for variants (e.g., `?variant=thumbnail`).
 
-## Phase 10: Cleanup & Advanced Features
+## Phase 10: Cleanup & Advanced Features [Completed]
 **Goal**: Maintenance tasks and polish.
 
-- [ ] **Deletion Logic**
-    - [ ] Implement hard delete (remove from DB + S3).
-    - [ ] Implement cascade delete (Project -> Files).
-- [ ] **Cleanup Jobs**
-    - [ ] Scheduled job to remove "soft deleted" items after X days.
-    - [ ] Scheduled job to clean orphaned S3 objects.
-- [ ] **Variant Synchronization**
-    - [ ] Trigger background job on project settings update.
-    - [ ] Generate missing variants for existing images (if new variant added).
-    - [ ] Delete obsolete variants (if variant removed).
-
+- [x] **Deletion Logic**
+    - [x] `DELETE /files/:id`: Hard delete file.
+        - [x] Verify ownership.
+        - [x] Delete from S3 (original + all variants).
+        - [x] Delete from DB.
+    - [x] `DELETE /projects/:id`: Support `?permanent=true` for hard delete.
+        - [x] If permanent:
+            - [x] Iterate all project files.
+            - [x] Delete each file from S3.
+            - [x] Delete project (DB cascade handles file rows, or manual delete).
+- [x] **Cleanup Jobs**
+    - [x] `src/services/cleanup.rs`: Background cleanup service.
+    - [x] Job: Remove "soft deleted" projects > 30 days.
+    - [ ] Job: Scan S3 vs DB to find orphaned objects (advanced).
+- [x] **Variant Synchronization**
+    - [x] `POST /projects/:id/sync-variants`: Manual trigger.
+    - [x] Worker: `SyncProjectVariants` -> Spawn `SyncFileVariants`.
+    - [x] Worker: `SyncFileVariants` -> Regenerate/Upload.
 ## Phase 11: API Documentation
 **Goal**: Provide interactive API documentation via Swagger/OpenAPI.
 

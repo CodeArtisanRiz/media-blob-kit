@@ -39,6 +39,7 @@ use utoipa_swagger_ui::SwaggerUi;
         projects::get_project,
         projects::update_project,
         projects::delete_project,
+        projects::sync_variants,
         // API Key endpoints
         api_keys::create_api_key,
         api_keys::list_api_keys,
@@ -54,6 +55,7 @@ use utoipa_swagger_ui::SwaggerUi;
         files::list_files,
         files::get_file,
         files::get_file_content,
+        files::delete_file,
     ),
     components(
         schemas(
@@ -150,13 +152,14 @@ pub fn create_routes(db: DatabaseConnection) -> Router {
         .route("/projects/{id}", get(projects::get_project))
         .route("/projects/{id}", axum::routing::put(projects::update_project))
         .route("/projects/{id}", delete(projects::delete_project))
+        .route("/projects/{id}/sync-variants", post(projects::sync_variants))
         .route("/projects/{id}/keys", post(api_keys::create_api_key))
         .route("/projects/{id}/keys", get(api_keys::list_api_keys))
         .route("/projects/{id}/keys/{key_id}", axum::routing::patch(api_keys::update_api_key))
         .route("/projects/{id}/keys/{key_id}", delete(api_keys::delete_api_key))
         .route("/admin/jobs", get(jobs::list_admin_jobs))
         .route("/files", get(files::list_files))
-        .route("/files/{id}", get(files::get_file))
+        .route("/files/{id}", get(files::get_file).delete(files::delete_file))
         .route("/files/{id}/content", get(files::get_file_content))
         .layer(middleware::from_fn(auth_middleware));
 

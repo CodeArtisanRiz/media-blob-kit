@@ -12,6 +12,7 @@ use crate::services::s3::S3Service;
 use crate::utils::{image_processor, sanitize_bucket_name};
 use crate::models::settings::VariantConfig;
 use std::collections::HashMap;
+use uuid::Uuid;
 
 #[derive(Clone)]
 pub struct Worker {
@@ -166,33 +167,143 @@ impl Worker {
     }
 
     async fn handle_job(&self, job: &job::Model) -> Result<(), String> {
-        // 1. Get File and Project
+        let payload = job.payload.as_object().ok_or("Invalid payload")?;
+
+        if let Some(job_type) = payload.get("type").and_then(|v| v.as_str()) {
+            match job_type {
+                "sync_project_variants" => self.handle_sync_project_variants(job).await,
+                "sync_file_variants" => self.handle_sync_file_variants(job).await,
+                _ => Err(format!("Unknown job type: {}", job_type)),
+            }
+        } else if payload.contains_key("variants") {
+             // Backward compatibility for existing ProcessImage jobs
+             self.handle_process_image(job).await
+        } else {
+             Err("Unknown job payload structure".to_string())
+        }
+    }
+
+    async fn handle_sync_project_variants(&self, job: &job::Model) -> Result<(), String> {
+        let payload = job.payload.as_object().unwrap();
+        let project_id_str = payload.get("project_id").and_then(|v| v.as_str()).ok_or("Missing project_id")?;
+        let project_id = Uuid::parse_str(project_id_str).map_err(|e| e.to_string())?;
+
+        // 1. Get Project Settings
+        let project = project::Entity::find_by_id(project_id)
+            .one(&self.db)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("Project not found")?;
+
+        let settings = project.settings.as_object().ok_or("Invalid project settings")?;
+        let variants_json = settings.get("variants").cloned().unwrap_or(serde_json::json!({}));
+        
+        // 2. Find all image files
+        let files = file::Entity::find()
+            .filter(file::Column::ProjectId.eq(project_id))
+            .filter(file::Column::MimeType.contains("image"))
+            .all(&self.db)
+            .await
+            .map_err(|e| e.to_string())?;
+
+        println!("SyncProjectVariants: Found {} images for project {}", files.len(), project.name);
+
+        // 3. Spawn SyncFileVariants job for each file
+        for f in files {
+            let job_payload = serde_json::json!({
+                "type": "sync_file_variants",
+                "file_id": f.id.to_string(),
+                "variants_config": variants_json // Pass config snapshot to ensure consistency
+            });
+
+            // Create Job
+            let job = job::ActiveModel {
+                id: Set(Uuid::new_v4()),
+                file_id: Set(f.id), // Link to file so we can track it
+                status: Set("pending".to_string()),
+                payload: Set(job_payload),
+                created_at: Set(chrono::Utc::now().naive_utc()),
+                updated_at: Set(chrono::Utc::now().naive_utc()),
+                ..Default::default()
+            };
+
+            job.insert(&self.db).await.map_err(|e| e.to_string())?;
+        }
+
+        Ok(())
+    }
+
+    async fn handle_sync_file_variants(&self, job: &job::Model) -> Result<(), String> {
+        // reuse process_image logic but with extra check for deleting obsolete?
+        // Actually, let's keep it simple: 
+        // 1. Generate missing variants.
+        // 2. Delete unknown variants (if variants_config is authoritative).
+        
+        let payload = job.payload.as_object().unwrap();
+        // let file_id_str = payload.get("file_id").and_then(|v| v.as_str()).unwrap();
+        // let file_id = Uuid::parse_str(file_id_str).unwrap(); 
+        // We have job.file_id already
+
+        let variants_config_json = payload.get("variants_config").ok_or("Missing variants_config")?;
+        let target_variants: HashMap<String, VariantConfig> = serde_json::from_value(variants_config_json.clone())
+            .map_err(|e| e.to_string())?;
+
+        // Get File
         let file = file::Entity::find_by_id(job.file_id)
             .one(&self.db)
             .await
             .map_err(|e| e.to_string())?
             .ok_or("File not found")?;
+        
+        // Get Current Variants from File JSON
+        // Note: previous implementation didn't strictly update variants_json with results?? 
+        // Let's assume we start relying on it or just overwriting it.
+        // If we didn't update it before, it might be empty.
+        
+        // Let's reuse handle_process_image but ensuring we pass the new config.
+        // But handle_process_image assumes the payload has "variants" and does the work.
+        // It does NOT delete old variants.
+        // It DOES update DB status.
+        
+        // Refactoring handle_process_image to be reusable would be best.
+        // Let's just call `process_image_logic` here.
+        
+        // But first, let's look at `handle_process_image` (which I renamed/extracted below).
+        
+        self.process_image_logic(&file, target_variants).await
+    }
 
+    async fn handle_process_image(&self, job: &job::Model) -> Result<(), String> {
+         let payload = job.payload.as_object().ok_or("Invalid payload")?;
+         let variants_json = payload.get("variants").ok_or("No variants in payload")?;
+         let variants: HashMap<String, VariantConfig> = serde_json::from_value(variants_json.clone())
+             .map_err(|e| e.to_string())?;
+         
+         // 1. Get File
+         let file = file::Entity::find_by_id(job.file_id)
+            .one(&self.db)
+            .await
+            .map_err(|e| e.to_string())?
+            .ok_or("File not found")?;
+
+         self.process_image_logic(&file, variants).await
+    }
+
+    async fn process_image_logic(&self, file: &file::Model, variants: HashMap<String, VariantConfig>) -> Result<(), String> {
         let project = project::Entity::find_by_id(file.project_id)
             .one(&self.db)
             .await
             .map_err(|e| e.to_string())?
             .ok_or("Project not found")?;
 
-        // 2. Parse payload for variants
-        let payload = job.payload.as_object().ok_or("Invalid payload")?;
-        let variants_json = payload.get("variants").ok_or("No variants in payload")?;
-        let variants: HashMap<String, VariantConfig> = serde_json::from_value(variants_json.clone())
-            .map_err(|e| e.to_string())?;
-
-        // 3. Download original file
+        // Download original file
         let original_data = self.s3.get_object(&file.s3_key).await.map_err(|e| e.to_string())?;
 
-        // 4. Process each variant
-        // 4. Process each variant
+        let mut successful_variants = serde_json::Map::new();
+
+        // Process each variant
         for (variant_name, config) in variants {
             println!("Processing variant: {}", variant_name);
-            let start_time = std::time::Instant::now();
             
             // Clone data to move into validation closure
             let original_data_clone = original_data.clone();
@@ -205,12 +316,6 @@ impl Worker {
               .map_err(|e| format!("Task join error: {}", e))?
               .map_err(|e| e.to_string())?;
 
-            let elapsed = start_time.elapsed();
-            let src_size = format_size(original_data.len());
-            let dest_size = format_size(processed_data.len());
-            println!("took {:.2?} | {} -> {}", elapsed, src_size, dest_size);
-
-            // Determine extension
             let ext = match mime_type.as_str() {
                 "image/avif" => "avif",
                 "image/webp" => "webp",
@@ -219,8 +324,6 @@ impl Worker {
                 _ => "bin",
             };
 
-            // Construct S3 Key
-            // Format: {project_name}-{project_id}/images/{variant_name}/{file_id}.{ext}
             let s3_key = format!("{}-{}/images/{}/{}.{}", 
                 sanitize_bucket_name(&project.name), 
                 project.id, 
@@ -230,14 +333,22 @@ impl Worker {
             );
 
             // Upload to S3
-            println!("Uploading variant {} to S3 key: {}", variant_name, s3_key);
             self.s3.put_object(&s3_key, processed_data, &mime_type).await.map_err(|e| e.to_string())?;
-            println!("Variant {} uploaded successfully", variant_name);
+            
+            // Store successful variant path (future proofing)
+            // Storing absolute key or URL? 
+            // Previous code calculated it on the fly in `get_file_content`.
+            // But storing it in `variants_json` is better.
+            // Let's store the full S3 Key or relative path.
+            // Consistency: store full S3 Key? Or just the URL?
+            // Let's store the S3 Key.
+            successful_variants.insert(variant_name, serde_json::Value::String(s3_key));
         }
 
-        // 5. Update File status
-        let mut file_active: file::ActiveModel = file.into();
+        // Update File status AND variants_json
+        let mut file_active: file::ActiveModel = file.clone().into();
         file_active.status = Set("ready".to_string());
+        file_active.variants_json = Set(serde_json::Value::Object(successful_variants));
         file_active.updated_at = Set(chrono::Utc::now().naive_utc());
         file_active.update(&self.db).await.map_err(|e| e.to_string())?;
 

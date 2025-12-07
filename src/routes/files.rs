@@ -345,6 +345,104 @@ pub async fn get_file_content(
     let s3_service = S3Service::new().await;
     let url = s3_service.get_presigned_url(&key, Duration::from_secs(3600)).await?;
 
+
     // 6. Redirect
     Ok(Redirect::temporary(&url))
+}
+
+// DELETE /files/:id
+#[utoipa::path(
+    delete,
+    path = "/files/{id}",
+    params(
+        ("id" = Uuid, Path, description = "File ID")
+    ),
+    responses(
+        (status = 200, description = "File deleted successfully"),
+        (status = 404, description = "File not found"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "Files"
+)]
+pub async fn delete_file(
+    Path(id): Path<Uuid>,
+    Extension(user): Extension<AuthUser>,
+    State(db): State<sea_orm::DatabaseConnection>,
+) -> Result<Json<serde_json::Value>, AppError> {
+    // 1. Get File
+    let file = file::Entity::find_by_id(id)
+        .one(&db)
+        .await
+        .map_err(|e| AppError::InternalServerError(e.to_string()))?
+        .ok_or(AppError::NotFound("File not found".into()))?;
+
+    // 2. Verify Access
+    if user.role != crate::entities::user::Role::Su {
+        let project = project::Entity::find_by_id(file.project_id)
+            .one(&db)
+            .await
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?
+            .ok_or(AppError::NotFound("Project not found".into()))?;
+
+        if project.owner_id != user.id {
+            return Err(AppError::Forbidden("Access denied to this file".into()));
+        }
+    }
+
+    // 3. Delete from S3 (Original + Variants)
+    let s3_service = S3Service::new().await;
+
+    // Delete Original
+    if let Err(e) = s3_service.delete_object(&file.s3_key).await {
+        eprintln!("Failed to delete original file from S3: {}", e);
+        // Continue to try deleting variants and DB record? 
+        // Or fail? Best effort is usually preferred for cleanup.
+    }
+
+    // Delete Variants
+    if let Some(variants) = file.variants_json.as_object() {
+        for (_variant_name, variant_path) in variants {
+            if let Some(variant_str) = variant_path.as_str() {
+                // Extract Key logic (similar to get_file_content but simplified or extract common logic)
+                // For now, let's copy the extraction logic or assume logic.
+                // Wait, if we stored full URLs, we need to extract key.
+                
+                let config = crate::config::get_config();
+                let bucket = &config.s3_bucket_name;
+                
+                let key_to_delete = if let Some(idx) = variant_str.find(&format!("/{}/", bucket)) {
+                     Some(variant_str[idx + bucket.len() + 2..].to_string())
+                } else if let Ok(url) = url::Url::parse(variant_str) {
+                     Some(url.path().trim_start_matches('/').to_string())
+                } else {
+                    None
+                };
+
+                if let Some(key) = key_to_delete {
+                    if let Err(e) = s3_service.delete_object(&key).await {
+                        eprintln!("Failed to delete variant from S3: {}", e);
+                    }
+                }
+            }
+        }
+    }
+
+    // 4. Delete from DB
+    // Use ActiveModel to delete
+    let res = file::Entity::delete_by_id(id)
+        .exec(&db)
+        .await
+        .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+
+    if res.rows_affected == 0 {
+         return Err(AppError::NotFound("File not found in DB".into()));
+    }
+
+    Ok(Json(serde_json::json!({
+        "message": "File deleted successfully",
+        "id": id
+    })))
 }
