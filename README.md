@@ -291,7 +291,6 @@ The [`IMPLEMENTATION.md`](IMPLEMENTATION.md) file outlines a comprehensive 10-ph
 - ⏳ Pending: File metadata and URL endpoints
 - ⏳ Pending: S3 presigned URLs or proxy
 - ⏳ Pending: Image variant serving
-- ⏳ Pending: Lazy processing for on-demand variants
 
 **Phase 10: Cleanup & Advanced Features**
 - ⏳ Pending: Hard and cascade delete logic

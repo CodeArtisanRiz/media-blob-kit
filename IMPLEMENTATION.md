@@ -62,10 +62,6 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [x] `PATCH /projects/:id/keys/:key_id`: Enable/Disable an API key.
     - [x] `DELETE /projects/:id/keys/:key_id`: Permanently delete an API key.
 
-> [!NOTE]
-> **Future Improvement**: When updating project settings via `PUT /projects/:id`, if the `image_variants` configuration changes, we need to trigger a background job to:
-> 1. Generate missing variants for existing images (if a new variant is added).
-> 2. Delete obsolete variants (if a variant is removed).
 
 ## Phase 4: Core Improvements & Refactoring [Completed]
 **Goal**: Enhance code quality, performance, and standard features.
@@ -156,7 +152,6 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [ ] `GET /files/:id`: Get file metadata and public URL.
     - [ ] `GET /files/:id/content`: Redirect to S3 presigned URL or proxy content.
     - [ ] Support query params for variants (e.g., `?variant=thumbnail`).
-    - [ ] Implement "Lazy Processing": If variant doesn't exist, trigger job and return original/placeholder.
 
 ## Phase 10: Cleanup & Advanced Features
 **Goal**: Maintenance tasks and polish.
@@ -167,6 +162,10 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
 - [ ] **Cleanup Jobs**
     - [ ] Scheduled job to remove "soft deleted" items after X days.
     - [ ] Scheduled job to clean orphaned S3 objects.
+- [ ] **Variant Synchronization**
+    - [ ] Trigger background job on project settings update.
+    - [ ] Generate missing variants for existing images (if new variant added).
+    - [ ] Delete obsolete variants (if variant removed).
 
 ## Phase 11: API Documentation
 **Goal**: Provide interactive API documentation via Swagger/OpenAPI.
