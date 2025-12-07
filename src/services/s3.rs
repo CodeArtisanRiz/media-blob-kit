@@ -163,4 +163,29 @@ impl S3Service {
 
         Ok(())
     }
+
+    pub async fn get_presigned_url(
+        &self, 
+        key: &str, 
+        expires_in: std::time::Duration
+    ) -> Result<String, AppError> {
+        let presigning_config = aws_sdk_s3::presigning::PresigningConfig::expires_in(expires_in)
+            .map_err(|e| {
+                eprintln!("Presigning Config Error: {}", e);
+                AppError::InternalServerError("Failed to configure presigner".to_string())
+            })?;
+
+        let presigned_req = self.client
+            .get_object()
+            .bucket(&self.bucket_name)
+            .key(key)
+            .presigned(presigning_config)
+            .await
+            .map_err(|e| {
+                eprintln!("Presigning Error: {}", e);
+                AppError::InternalServerError("Failed to generate presigned URL".to_string())
+            })?;
+
+        Ok(presigned_req.uri().to_string())
+    }
 }

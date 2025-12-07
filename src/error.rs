@@ -12,6 +12,7 @@ pub enum AppError {
     BadRequest(String),
     InternalServerError(String),
     Conflict(String),
+    Forbidden(String),
 }
 
 impl IntoResponse for AppError {
@@ -29,6 +30,7 @@ impl IntoResponse for AppError {
                 (StatusCode::INTERNAL_SERVER_ERROR, "Internal server error".to_string())
             }
             AppError::Conflict(msg) => (StatusCode::CONFLICT, msg.clone()),
+            AppError::Forbidden(msg) => (StatusCode::FORBIDDEN, msg.clone()),
         };
 
         // Log all errors with status code
@@ -51,6 +53,7 @@ impl std::fmt::Display for AppError {
             AppError::BadRequest(msg) => write!(f, "Bad request: {}", msg),
             AppError::InternalServerError(msg) => write!(f, "Internal server error: {}", msg),
             AppError::Conflict(msg) => write!(f, "Conflict: {}", msg),
+            AppError::Forbidden(msg) => write!(f, "Forbidden: {}", msg),
         }
     }
 }

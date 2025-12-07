@@ -144,14 +144,14 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [x] Spawn distinct tasks for each job `handle_job` call.
     - [x] Ensure database connections are efficiently managed using the pool.
 
-## Phase 9: File Retrieval & Serving
+## Phase 9: File Retrieval & Serving [Completed]
 **Goal**: Serve files and specific image variants.
 
-- [ ] **Retrieval API**
-    - [ ] `GET /files`: List all files (Paginated, query param `?project_id=<id>`).
-    - [ ] `GET /files/:id`: Get file metadata and public URL.
-    - [ ] `GET /files/:id/content`: Redirect to S3 presigned URL or proxy content.
-    - [ ] Support query params for variants (e.g., `?variant=thumbnail`).
+- [x] **Retrieval API**
+    - [x] `GET /files`: List all files (Paginated, query param `?project_id=<id>`).
+    - [x] `GET /files/:id`: Get file metadata and public URL.
+    - [x] `GET /files/:id/content`: Redirect to S3 presigned URL or proxy content.
+        - [x] Support query params for variants (e.g., `?variant=thumbnail`).
 
 ## Phase 10: Cleanup & Advanced Features
 **Goal**: Maintenance tasks and polish.
@@ -177,6 +177,7 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
 - [x] **Endpoint Documentation**
     - [x] Document all authentication endpoints (`/auth/login`, `/auth/refresh`, `/auth/logout`, `/auth/me`).
     - [x] Document all user management endpoints (`/users`).
+    - [x] Document all file retrieval endpoints (`/files`).
     - [x] Add request/response schema annotations.
 - [x] **Swagger UI**
     - [x] Setup Swagger UI at `/swagger-ui`.

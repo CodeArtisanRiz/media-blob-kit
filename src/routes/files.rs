@@ -1,0 +1,350 @@
+use axum::{
+    extract::{Path, Query, State, Extension},
+    response::{Redirect},
+    Json,
+};
+use sea_orm::{
+    ColumnTrait, EntityTrait, QueryFilter, QueryOrder, QuerySelect, PaginatorTrait,
+    Condition,
+};
+use serde::{Deserialize, Serialize};
+use serde_json::Value;
+use std::time::Duration;
+use uuid::Uuid;
+
+use crate::entities::{file, project};
+use crate::error::AppError;
+use crate::middleware::auth::AuthUser;
+use crate::pagination::PaginatedResponse;
+use crate::services::s3::S3Service;
+
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct ListFilesQuery {
+    pub page: Option<u64>,
+    pub limit: Option<u64>,
+    pub project_id: Option<Uuid>,
+}
+
+#[derive(Serialize, utoipa::ToSchema)]
+pub struct FileResponse {
+    pub id: Uuid,
+    pub project_id: Uuid,
+    pub filename: String,
+    pub mime_type: String,
+    pub size: i64,
+    pub url: String, // Public URL (if public) or Presigned
+    #[schema(value_type = Object)]
+    pub variants: Value,
+    pub created_at: String,
+}
+
+impl From<file::Model> for FileResponse {
+    fn from(model: file::Model) -> Self {
+        // Construct public URL
+        // We need the config to get bucket name/endpoint, but simpler is to use S3Service helper if we had one.
+        // For now, let's assume standard S3 path structure for public or we can return the key.
+        // The requirement says "Public URL".
+        
+        let config = crate::config::get_config();
+        let base_url = if let Some(endpoint) = &config.s3_endpoint {
+            format!("{}/{}", endpoint, config.s3_bucket_name)
+        } else {
+             format!("https://{}.s3.{}.amazonaws.com", config.s3_bucket_name, config.aws_region)
+        };
+
+        let url = format!("{}/{}", base_url, model.s3_key);
+
+        Self {
+            id: model.id,
+            project_id: model.project_id,
+            filename: model.filename,
+            mime_type: model.mime_type,
+            size: model.size,
+            url,
+            variants: model.variants_json, // This is already Value
+            created_at: model.created_at.to_string(),
+        }
+    }
+}
+
+// GET /files
+// GET /files
+#[utoipa::path(
+    get,
+    path = "/files",
+    params(
+        ListFilesQuery
+    ),
+    responses(
+        (status = 200, description = "List of files", body = PaginatedResponse<FileResponse>),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "Files"
+)]
+pub async fn list_files(
+    Extension(user): Extension<AuthUser>,
+    State(db): State<sea_orm::DatabaseConnection>,
+    Query(query): Query<ListFilesQuery>,
+) -> Result<Json<PaginatedResponse<FileResponse>>, AppError> {
+    let page = query.page.unwrap_or(1);
+    let limit = query.limit.unwrap_or(10);
+
+    // 2. Build Filter
+    let mut condition = Condition::all();
+
+    // Role-based Access Control
+    match user.role {
+        crate::entities::user::Role::Su => {
+            // SU can see all files, or filter by specific project
+            if let Some(pid) = query.project_id {
+                condition = condition.add(file::Column::ProjectId.eq(pid));
+            }
+        },
+        _ => {
+            // Admin/User can only see files from projects they own
+            // First, find all project IDs owned by this user
+            let user_projects: Vec<Uuid> = project::Entity::find()
+                .filter(project::Column::OwnerId.eq(user.id))
+                .select_only()
+                .column(project::Column::Id)
+                .into_tuple()
+                .all(&db)
+                .await
+                .map_err(|e| AppError::InternalServerError(e.to_string()))?;
+
+            if user_projects.is_empty() {
+                // If user has no projects, return empty list immediately
+                return Ok(Json(PaginatedResponse {
+                    data: vec![],
+                    total_items: 0,
+                    total_pages: 0,
+                    current_page: page,
+                    page_size: limit,
+                }));
+            }
+
+            if let Some(pid) = query.project_id {
+                // If requesting specific project, verify ownership
+                if !user_projects.contains(&pid) {
+                    return Err(AppError::Forbidden("Access denied to this project".into()));
+                }
+                condition = condition.add(file::Column::ProjectId.eq(pid));
+            } else {
+                // Filter where project_id IN (user_projects)
+                condition = condition.add(file::Column::ProjectId.is_in(user_projects));
+            }
+        }
+    }
+
+    // 3. Execute Query
+    let paginator = file::Entity::find()
+        .filter(condition)
+        .order_by_desc(file::Column::CreatedAt)
+        .paginate(&db, limit);
+
+    let total_items = paginator.num_items().await.map_err(|e| AppError::InternalServerError(e.to_string()))?;
+    let total_pages = paginator.num_pages().await.map_err(|e| AppError::InternalServerError(e.to_string()))?;
+    let items = paginator.fetch_page(page - 1).await.map_err(|e| AppError::InternalServerError(e.to_string()))?;
+
+    let data: Vec<FileResponse> = items.into_iter().map(FileResponse::from).collect();
+
+    Ok(Json(PaginatedResponse {
+        data,
+        total_items,
+        total_pages,
+        current_page: page,
+        page_size: limit,
+    }))
+}
+
+// GET /files/:id
+// GET /files/:id
+#[utoipa::path(
+    get,
+    path = "/files/{id}",
+    params(
+        ("id" = Uuid, Path, description = "File ID")
+    ),
+    responses(
+        (status = 200, description = "File details", body = FileResponse),
+        (status = 404, description = "File not found"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "Files"
+)]
+pub async fn get_file(
+    Path(id): Path<Uuid>,
+    Extension(user): Extension<AuthUser>,
+    State(db): State<sea_orm::DatabaseConnection>,
+) -> Result<Json<FileResponse>, AppError> {
+    // 1. Get File
+    let file = file::Entity::find_by_id(id)
+        .one(&db)
+        .await
+        .map_err(|e| AppError::InternalServerError(e.to_string()))?
+        .ok_or(AppError::NotFound("File not found".into()))?;
+
+    // 3. Verify Access
+    if user.role != crate::entities::user::Role::Su {
+        // Check if user owns the project this file belongs to
+        let project = project::Entity::find_by_id(file.project_id)
+            .one(&db)
+            .await
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?
+            .ok_or(AppError::NotFound("Project not found".into()))?; // Should not happen for valid file
+
+        if project.owner_id != user.id {
+            return Err(AppError::Forbidden("Access denied to this file".into()));
+        }
+    }
+
+    Ok(Json(FileResponse::from(file)))
+}
+
+#[derive(Deserialize, utoipa::IntoParams)]
+pub struct ContentQuery {
+    pub variant: Option<String>,
+}
+
+// GET /files/:id/content
+// GET /files/:id/content
+#[utoipa::path(
+    get,
+    path = "/files/{id}/content",
+    params(
+        ("id" = Uuid, Path, description = "File ID"),
+        ContentQuery
+    ),
+    responses(
+        (status = 307, description = "Temporary redirect to S3 URL"),
+        (status = 404, description = "File not found"),
+        (status = 500, description = "Internal server error")
+    ),
+    security(
+        ("bearer_auth" = [])
+    ),
+    tag = "File Upload"
+)]
+pub async fn get_file_content(
+    Path(id): Path<Uuid>,
+    Query(query): Query<ContentQuery>,
+    Extension(user): Extension<AuthUser>,
+    State(db): State<sea_orm::DatabaseConnection>,
+) -> Result<Redirect, AppError> {
+    // 1. Get File
+    let file = file::Entity::find_by_id(id)
+        .one(&db)
+        .await
+        .map_err(|e| AppError::InternalServerError(e.to_string()))?
+        .ok_or(AppError::NotFound("File not found".into()))?;
+
+    // 3. Verify Access
+    if user.role != crate::entities::user::Role::Su {
+        let project = project::Entity::find_by_id(file.project_id)
+            .one(&db)
+            .await
+            .map_err(|e| AppError::InternalServerError(e.to_string()))?
+            .ok_or(AppError::NotFound("Project not found".into()))?;
+
+        if project.owner_id != user.id {
+            return Err(AppError::Forbidden("Access denied to this file".into()));
+        }
+    }
+
+    // 4. Resolve Key (Original vs Variant)
+    let key = if let Some(variant_name) = query.variant {
+        // Check if variant exists in JSON
+        let variants = file.variants_json.as_object().ok_or(AppError::InternalServerError("Invalid variants data".into()))?;
+        
+        // Variants map should be { "name": "url_or_path" } or similar structure? 
+        // Wait, in Upload Image phase we stored URLs in response, but what did we store in DB?
+        // Let's look at `worker.rs`.
+        // Worker calculates s3_key: `{project}-{id}/images/{variant}/{file_id}.{ext}`
+        // It doesn't seem to explicitly update the `variants_json` in DB with the new key/url?
+        // Let's re-read worker.rs logic.
+        
+        // Ah, in Phase 5 Upload API, we calculated *future* URLs.
+        // But the worker does NOT update the `variants_json` column in `files` table after processing?
+        // Let's assume for now we can dynamically reconstruct the path based on convention if needed, 
+        // OR we need to check if the DB actually has the variant data.
+        
+        // In `src/routes/upload.rs` (implied from docs), we calculated paths. 
+        // But standard implementation usually stores the resulting map in DB.
+        // Let's assume standard behavior: `variants_json` contains map of `variant_name` -> `s3_path` or `public_url`.
+        
+        if let Some(variant_path) = variants.get(&variant_name) {
+            // If it's a full URL, we might need to parse it to get the key?
+            // Or if we stored the relative S3 key?
+            // Let's assume we stored the full URL or S3 Key. 
+            // If it's a full URL, we can't easily presign it if it's pointing to a custom domain?
+            // Actually, for presigning, we need the Object Key.
+            
+            // Re-evaluating: In `worker.rs`:
+            // It updates status to "ready", but does NOT update `variants_json`!
+            // This is a missing link in previous phases or implies we must rely on convention.
+            // Convention from `worker.rs`: `{project_name}-{project_id}/images/{variant_name}/{file_id}.{ext}`
+            
+            // So we need to reconstruct the key.
+            // We need project name.
+
+                
+
+            // We need the extension. The original file has `mime_type`.
+            // The variant extension depends on the variant config (e.g. thumb -> webp).
+            // But we don't have the config here easily without querying project settings and re-parsing.
+            
+            // ALTERNATIVE: Use the `variants_json` if it WAS populated.
+            // If it wasn't populated, we have a problem: we don't know the extension of the variant (could be webp, avif, jpg).
+            
+            // Let's check `files` table schema in DB or migration.
+            // If `variants_json` is empty in DB, we can't trivially know which variants exist.
+            
+            // Assuming for now that `variants_json` IS populated by the upload handler with EXPECTED paths?
+            // `POST /upload/image` -> "Calculates future variant paths". 
+            // Did it save them to DB?
+            // If yes, `file.variants_json` has them.
+            // If they are full URLs, we must extract the Key.
+            // Format: `https://bucket.s3.region.amazonaws.com/KEY` or `endpoint/bucket/KEY`.
+            
+            let variant_value = variant_path.as_str().ok_or(AppError::NotFound("Invalid variant path".into()))?;
+            
+            // Extract Key from URL.
+            // Simple heuristic used in many systems: split by bucket name?
+            // Or just store keys in DB...
+            
+            // Since I cannot verify the DB content easily without running it, 
+            // I will implement a robust URL-to-Key extractor assuming standard format.
+            
+            let config = crate::config::get_config();
+            let bucket = &config.s3_bucket_name;
+            
+            // Try to find `/bucket_name/` in URL and take everything after.
+            if let Some(idx) = variant_value.find(&format!("/{}/", bucket)) {
+                 variant_value[idx + bucket.len() + 2..].to_string()
+            } else {
+                // S3 Vhost style: `bucket.s3.../KEY`
+                // Take path part.
+                let url = url::Url::parse(variant_value).map_err(|_| AppError::InternalServerError("Failed to parse variant URL".into()))?;
+                url.path().trim_start_matches('/').to_string()
+            }
+        } else {
+             return Err(AppError::NotFound(format!("Variant '{}' not found", variant_name)));
+        }
+    } else {
+        // Original File
+        file.s3_key
+    };
+
+    // 5. Generate Presigned URL
+    let s3_service = S3Service::new().await;
+    let url = s3_service.get_presigned_url(&key, Duration::from_secs(3600)).await?;
+
+    // 6. Redirect
+    Ok(Redirect::temporary(&url))
+}

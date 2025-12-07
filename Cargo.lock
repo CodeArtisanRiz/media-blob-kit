@@ -2734,6 +2734,7 @@ dependencies = [
  "tokio",
  "tower",
  "tower-http",
+ "url",
  "utoipa",
  "utoipa-axum",
  "utoipa-swagger-ui",

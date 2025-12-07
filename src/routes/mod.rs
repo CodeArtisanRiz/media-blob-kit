@@ -5,6 +5,7 @@ mod projects;
 mod api_keys;
 pub mod upload;
 mod jobs;
+mod files;
 
 use axum::{
     routing::{get, post, delete},
@@ -49,6 +50,10 @@ use utoipa_swagger_ui::SwaggerUi;
         // Jobs endpoints
         jobs::list_jobs,
         jobs::list_admin_jobs,
+        // File endpoints
+        files::list_files,
+        files::get_file,
+        files::get_file_content,
     ),
     components(
         schemas(
@@ -81,7 +86,10 @@ use utoipa_swagger_ui::SwaggerUi;
             upload::ImageUploadResponse,
             // Job schemas
             jobs::JobResponse,
-            jobs::PaginatedProjectJobsResponse,
+            jobs::JobResponse,
+        jobs::PaginatedProjectJobsResponse,
+        // File schemas
+        files::FileResponse,
         )
     ),
     tags(
@@ -91,6 +99,7 @@ use utoipa_swagger_ui::SwaggerUi;
         (name = "Project Management", description = "Project management endpoints"),
         (name = "Project API Keys", description = "API Key management endpoints"),
         (name = "File Upload", description = "File and Image upload endpoints"),
+        (name = "Files", description = "File retrieval and serving endpoints"),
         (name = "Jobs", description = "Background job management endpoints")
     ),
     info(
@@ -146,6 +155,9 @@ pub fn create_routes(db: DatabaseConnection) -> Router {
         .route("/projects/{id}/keys/{key_id}", axum::routing::patch(api_keys::update_api_key))
         .route("/projects/{id}/keys/{key_id}", delete(api_keys::delete_api_key))
         .route("/admin/jobs", get(jobs::list_admin_jobs))
+        .route("/files", get(files::list_files))
+        .route("/files/{id}", get(files::get_file))
+        .route("/files/{id}/content", get(files::get_file_content))
         .layer(middleware::from_fn(auth_middleware));
 
     // Su-only routes

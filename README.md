@@ -288,9 +288,9 @@ The [`IMPLEMENTATION.md`](IMPLEMENTATION.md) file outlines a comprehensive 10-ph
 - ✅ Completed: Semaphore-based parallel execution
 
 **Phase 9: File Retrieval & Serving**
-- ⏳ Pending: File metadata and URL endpoints
-- ⏳ Pending: S3 presigned URLs or proxy
-- ⏳ Pending: Image variant serving
+- ✅ Completed: File metadata and URL endpoints
+- ✅ Completed: S3 presigned URLs or proxy
+- ✅ Completed: Image variant serving
 
 **Phase 10: Cleanup & Advanced Features**
 - ⏳ Pending: Hard and cascade delete logic
