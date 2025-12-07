@@ -123,7 +123,8 @@ pub async fn create_user(
     get,
     path = "/users",
     params(
-        Pagination
+        ("page" = Option<u64>, Query, description = "Page number"),
+        ("limit" = Option<u64>, Query, description = "Items per page")
     ),
     responses(
         (status = 200, description = "List of all users", body = PaginatedResponse<UserResponse>),

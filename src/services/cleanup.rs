@@ -1,8 +1,8 @@
-use sea_orm::{DatabaseConnection, EntityTrait, QueryFilter, ColumnTrait, QuerySelect, ActiveModelTrait};
+use sea_orm::{DatabaseConnection, EntityTrait, QueryFilter, ColumnTrait};
 use crate::entities::{project, file};
 use crate::services::s3::S3Service;
 use std::time::Duration;
-use chrono::{Utc, NaiveDateTime};
+use chrono::Utc;
 
 pub struct CleanupService {
     db: DatabaseConnection,

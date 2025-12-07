@@ -102,11 +102,13 @@ pub async fn create_project(
     Ok((StatusCode::CREATED, Json(ProjectResponse::from(created_project))))
 }
 
+// GET /projects
 #[utoipa::path(
     get,
     path = "/projects",
     params(
-        Pagination
+        ("page" = Option<u64>, Query, description = "Page number"),
+        ("limit" = Option<u64>, Query, description = "Items per page")
     ),
     responses(
         (status = 200, description = "List of user's projects", body = PaginatedResponse<ProjectResponse>),
@@ -122,7 +124,6 @@ pub async fn list_projects(
     auth_user: axum::Extension<AuthUser>,
     Query(pagination): Query<Pagination>,
 ) -> Result<Json<PaginatedResponse<ProjectResponse>>, AppError> {
-
 
     let page = pagination.page.unwrap_or(1);
     let limit = pagination.limit.unwrap_or(10);
@@ -146,7 +147,7 @@ pub async fn list_projects(
     get,
     path = "/projects/{id}",
     params(
-        ("id" = String, Path, description = "Project ID")
+        ("id" = Uuid, Path, description = "Project ID")
     ),
     responses(
         (status = 200, description = "Project details", body = ProjectResponse),
@@ -185,7 +186,7 @@ pub async fn get_project(
     put,
     path = "/projects/{id}",
     params(
-        ("id" = String, Path, description = "Project ID")
+        ("id" = Uuid, Path, description = "Project ID")
     ),
     request_body = UpdateProjectRequest,
     responses(
@@ -243,7 +244,7 @@ pub async fn update_project(
     path = "/projects/{id}",
     params(
         ("id" = Uuid, Path, description = "Project ID"),
-        DeleteProjectQuery
+        ("permanent" = Option<bool>, Query, description = "Permanently delete project and files")
     ),
     responses(
         (status = 200, description = "Project deleted successfully"),
@@ -350,6 +351,7 @@ pub async fn delete_project(
         }
     }
 }
+
 
 #[utoipa::path(
     post,

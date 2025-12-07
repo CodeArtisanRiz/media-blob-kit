@@ -21,18 +21,7 @@ pub struct Worker {
     semaphore: Arc<Semaphore>,
 }
 
-fn format_size(bytes: usize) -> String {
-    const KB: f64 = 1024.0;
-    const MB: f64 = KB * 1024.0;
-    
-    if bytes as f64 >= MB {
-        format!("{:.2}MiB", bytes as f64 / MB)
-    } else if bytes as f64 >= KB {
-        format!("{:.2}kb", bytes as f64 / KB)
-    } else {
-        format!("{}b", bytes)
-    }
-}
+
 
 impl Worker {
     pub async fn new(db: DatabaseConnection) -> Self {

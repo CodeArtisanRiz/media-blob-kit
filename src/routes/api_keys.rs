@@ -126,7 +126,8 @@ pub async fn create_api_key(
     path = "/projects/{id}/keys",
     params(
         ("id" = String, Path, description = "Project ID"),
-        Pagination
+        ("page" = Option<u64>, Query, description = "Page number"),
+        ("limit" = Option<u64>, Query, description = "Items per page")
     ),
     responses(
         (status = 200, description = "List of API Keys", body = PaginatedResponse<ApiKeyResponse>),

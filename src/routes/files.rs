@@ -67,13 +67,13 @@ impl From<file::Model> for FileResponse {
     }
 }
 
-// GET /files
-// GET /files
 #[utoipa::path(
     get,
     path = "/files",
     params(
-        ListFilesQuery
+        ("page" = Option<u64>, Query, description = "Page number"),
+        ("limit" = Option<u64>, Query, description = "Items per page"),
+        ("project_id" = Option<Uuid>, Query, description = "Filter by Project ID")
     ),
     responses(
         (status = 200, description = "List of files", body = PaginatedResponse<FileResponse>),
@@ -82,7 +82,7 @@ impl From<file::Model> for FileResponse {
     security(
         ("bearer_auth" = [])
     ),
-    tag = "Files"
+    tag = "File Management"
 )]
 pub async fn list_files(
     Extension(user): Extension<AuthUser>,
@@ -161,7 +161,6 @@ pub async fn list_files(
 }
 
 // GET /files/:id
-// GET /files/:id
 #[utoipa::path(
     get,
     path = "/files/{id}",
@@ -176,7 +175,7 @@ pub async fn list_files(
     security(
         ("bearer_auth" = [])
     ),
-    tag = "Files"
+    tag = "File Management"
 )]
 pub async fn get_file(
     Path(id): Path<Uuid>,
@@ -213,13 +212,12 @@ pub struct ContentQuery {
 }
 
 // GET /files/:id/content
-// GET /files/:id/content
 #[utoipa::path(
     get,
     path = "/files/{id}/content",
     params(
         ("id" = Uuid, Path, description = "File ID"),
-        ContentQuery
+        ("variant" = Option<String>, Query, description = "Image variant name (e.g. 'thumbnail')")
     ),
     responses(
         (status = 307, description = "Temporary redirect to S3 URL"),
@@ -229,7 +227,7 @@ pub struct ContentQuery {
     security(
         ("bearer_auth" = [])
     ),
-    tag = "File Upload"
+    tag = "File Management"
 )]
 pub async fn get_file_content(
     Path(id): Path<Uuid>,
@@ -365,7 +363,7 @@ pub async fn get_file_content(
     security(
         ("bearer_auth" = [])
     ),
-    tag = "Files"
+    tag = "File Management"
 )]
 pub async fn delete_file(
     Path(id): Path<Uuid>,

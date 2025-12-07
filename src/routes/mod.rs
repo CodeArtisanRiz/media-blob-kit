@@ -101,7 +101,7 @@ use utoipa_swagger_ui::SwaggerUi;
         (name = "Project Management", description = "Project management endpoints"),
         (name = "Project API Keys", description = "API Key management endpoints"),
         (name = "File Upload", description = "File and Image upload endpoints"),
-        (name = "Files", description = "File retrieval and serving endpoints"),
+        (name = "File Management", description = "File retrieval and serving endpoints"),
         (name = "Jobs", description = "Background job management endpoints")
     ),
     info(
