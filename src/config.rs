@@ -10,6 +10,7 @@ pub struct Config {
     pub aws_secret_access_key: String,
     pub s3_bucket_name: String,
     pub s3_endpoint: Option<String>,
+    pub worker_concurrency: usize,
 }
 
 impl Config {
@@ -30,6 +31,10 @@ impl Config {
             aws_secret_access_key,
             s3_bucket_name,
             s3_endpoint,
+            worker_concurrency: env::var("WORKER_CONCURRENCY")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(1),
         }
     }
 }

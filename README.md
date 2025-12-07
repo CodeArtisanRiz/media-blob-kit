@@ -17,8 +17,8 @@ A high-performance media blob management system built with Rust, Axum, SeaORM, a
 | **Disk** | Minimal | 10 GB (for OS, logs, and temp buffering) |
 
 **Scaling & Concurrency:**
-- **Per Instance (Sequential)**: A single instance processes one job at a time (sequentially) to ensure predictable CPU usage (avoids freezing the web server).
-- **Horizontal Scaling**: To process multiple jobs in parallel, simply run multiple instances of the application. The `SKIP LOCKED` database queue ensures they distribute the load automatically.
+- **Per Instance (Configurable)**: By default, a single instance processes one job at a time. This can be increased via the `WORKER_CONCURRENCY` environment variable (e.g., `WORKER_CONCURRENCY=4`) to process multiple jobs in parallel.
+- **Horizontal Scaling**: To process multiple jobs in parallel across servers, simply run multiple instances of the application. The `SKIP LOCKED` database queue ensures they distribute the load automatically.
 
 > **Note on Safety**: You can run as many worker instances as you like. We use PostgreSQL's `FOR UPDATE SKIP LOCKED` clause, which guarantees that **no two workers will ever pick up the same job**, even if they query the database at the exact same millisecond.
 
@@ -27,6 +27,13 @@ A high-performance media blob management system built with Rust, Axum, SeaORM, a
 1.  Create a `.env` file with your DB credentials:
     ```env
     DATABASE_URL=postgres://username:yoursecretpassword@localhost:port/database_name
+    JWT_SECRET=your_super_secret_jwt_key
+    AWS_REGION=us-east-1                    # Required (use 'us-east-1' for MinIO if unsure)
+    AWS_ACCESS_KEY_ID=your_access_key
+    AWS_SECRET_ACCESS_KEY=your_secret_key
+    S3_BUCKET_NAME=your_bucket_name
+    S3_ENDPOINT=https://minio.example.com   # Optional (Required for MinIO)
+    WORKER_CONCURRENCY=4
     ```
 
 2.  Run migrations:
@@ -277,8 +284,8 @@ The [`IMPLEMENTATION.md`](IMPLEMENTATION.md) file outlines a comprehensive 10-ph
 - ✅ Completed: Variant generation and storage
 
 **Phase 8: Parallel Job Processing**
-- ⏳ Pending: Configurable concurrency (env driven)
-- ⏳ Pending: Semaphore-based parallel execution
+- ✅ Completed: Configurable concurrency (env driven)
+- ✅ Completed: Semaphore-based parallel execution
 
 **Phase 9: File Retrieval & Serving**
 - ⏳ Pending: File metadata and URL endpoints

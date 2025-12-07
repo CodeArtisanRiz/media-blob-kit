@@ -137,16 +137,16 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
 - [x] **Integration**: Automatic job creation on upload.
 - [x] **Worker Recovery**: Automatic reset of stale 'processing' jobs on startup.
 
-## Phase 8: Parallel Job Processing
+## Phase 8: Parallel Job Processing [Completed]
 **Goal**: Increase throughput by processing multiple jobs concurrently within a single worker instance.
 
-- [ ] **Configuration**
-    - [ ] Add `WORKER_CONCURRENCY` env var (default to 1).
-    - [ ] Update `Config` struct.
-- [ ] **Concurrency Logic**
-    - [ ] Use `tokio::sync::Semaphore` to limit concurrent jobs.
-    - [ ] Spawn distinct tasks for each job `handle_job` call.
-    - [ ] Ensure database connections are efficiently managed using the pool.
+- [x] **Configuration**
+    - [x] Add `WORKER_CONCURRENCY` env var (default to 1).
+    - [x] Update `Config` struct.
+- [x] **Concurrency Logic**
+    - [x] Use `tokio::sync::Semaphore` to limit concurrent jobs.
+    - [x] Spawn distinct tasks for each job `handle_job` call.
+    - [x] Ensure database connections are efficiently managed using the pool.
 
 ## Phase 9: File Retrieval & Serving
 **Goal**: Serve files and specific image variants.

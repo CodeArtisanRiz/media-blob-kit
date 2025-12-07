@@ -1,4 +1,6 @@
 use std::time::Duration;
+use std::sync::Arc;
+use tokio::sync::{Semaphore, OwnedSemaphorePermit};
 use sea_orm::{
     ActiveModelTrait, ColumnTrait, DatabaseConnection, EntityTrait, QueryFilter, 
     QueryOrder, QuerySelect, Set, TransactionTrait, ConnectionTrait
@@ -11,9 +13,11 @@ use crate::utils::{image_processor, sanitize_bucket_name};
 use crate::models::settings::VariantConfig;
 use std::collections::HashMap;
 
+#[derive(Clone)]
 pub struct Worker {
     db: DatabaseConnection,
     s3: S3Service,
+    semaphore: Arc<Semaphore>,
 }
 
 fn format_size(bytes: usize) -> String {
@@ -32,11 +36,13 @@ fn format_size(bytes: usize) -> String {
 impl Worker {
     pub async fn new(db: DatabaseConnection) -> Self {
         let s3 = S3Service::new().await;
-        Self { db, s3 }
+        let config = crate::config::get_config();
+        let semaphore = Arc::new(Semaphore::new(config.worker_concurrency));
+        Self { db, s3, semaphore }
     }
 
     pub async fn run(&self) {
-        println!("Worker started");
+        println!("Worker started with concurrency: {}", crate::config::get_config().worker_concurrency);
         
         // Recover any jobs stuck in 'processing' state from previous runs
         if let Err(e) = self.recover_stuck_jobs().await {
@@ -44,10 +50,33 @@ impl Worker {
         }
 
         loop {
-            if let Err(e) = self.process_next_job().await {
-                eprintln!("Worker error: {}", e);
+            // Acquire permit before looking for work
+            let permit = match self.semaphore.clone().acquire_owned().await {
+                Ok(p) => p,
+                Err(e) => {
+                    eprintln!("Semaphore error: {}", e);
+                    break;
+                }
+            };
+
+            match self.claim_next_job().await {
+                Ok(Some(job_model)) => {
+                    let worker = self.clone();
+                    tokio::spawn(async move {
+                        worker.perform_job(job_model, permit).await;
+                    });
+                }
+                Ok(None) => {
+                    // No jobs found, drop permit and sleep
+                    drop(permit);
+                    sleep(Duration::from_secs(5)).await;
+                }
+                Err(e) => {
+                    eprintln!("Worker error: {}", e);
+                    drop(permit);
+                    sleep(Duration::from_secs(5)).await;
+                }
             }
-            sleep(Duration::from_secs(5)).await;
         }
     }
 
@@ -70,15 +99,11 @@ impl Worker {
         Ok(())
     }
 
-    async fn process_next_job(&self) -> Result<(), String> {
+    async fn claim_next_job(&self) -> Result<Option<job::Model>, String> {
         // Start transaction
         let txn = self.db.begin().await.map_err(|e| e.to_string())?;
 
         // 1. Find pending job with lock
-        // Note: SeaORM 1.0+ supports locking. 
-        // We use raw query or specific lock methods if available.
-        // For now, we'll try standard find with lock.
-        
         let job_opt = job::Entity::find()
             .filter(job::Column::Status.eq("pending"))
             .order_by_asc(job::Column::CreatedAt)
@@ -90,7 +115,7 @@ impl Worker {
 
         let job_model = match job_opt {
             Some(j) => j,
-            None => return Ok(()), // No jobs
+            None => return Ok(None), // No jobs
         };
 
         println!("Worker picked up job {}", job_model.id);
@@ -104,8 +129,12 @@ impl Worker {
         // Commit transaction to release lock and save 'processing' state
         txn.commit().await.map_err(|e| e.to_string())?;
 
+        Ok(Some(job_model))
+    }
+
+    async fn perform_job(&self, job_model: job::Model, _permit: OwnedSemaphorePermit) {
+        // The permit is held until this function returns (active job count logic)
         // Now process the job (outside transaction to avoid holding DB lock during S3 ops)
-        // We re-fetch related data as needed.
         let job_start_time = std::time::Instant::now();
         
         match self.handle_job(&job_model).await {
@@ -115,7 +144,9 @@ impl Worker {
                 let mut job_active: job::ActiveModel = job_model.into();
                 job_active.status = Set("completed".to_string());
                 job_active.updated_at = Set(chrono::Utc::now().naive_utc());
-                job_active.update(&self.db).await.map_err(|e| e.to_string())?;
+                if let Err(e) = job_active.update(&self.db).await {
+                    eprintln!("Failed to update job status to completed: {}", e);
+                }
             },
             Err(e) => {
                 eprintln!("Job {} failed: {}", job_model.id, e);
@@ -127,11 +158,11 @@ impl Worker {
                     "original_payload": payload
                 }));
                 job_active.updated_at = Set(chrono::Utc::now().naive_utc());
-                job_active.update(&self.db).await.map_err(|e| e.to_string())?;
+                if let Err(e) = job_active.update(&self.db).await {
+                    eprintln!("Failed to update job status to failed: {}", e);
+                }
             }
         }
-
-        Ok(())
     }
 
     async fn handle_job(&self, job: &job::Model) -> Result<(), String> {
