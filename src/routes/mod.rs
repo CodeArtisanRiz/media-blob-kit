@@ -171,6 +171,7 @@ pub fn create_routes(db: DatabaseConnection) -> Router {
     // Public routes (no auth required) and merge all together
     let app_routes = Router::new()
         .route("/", get(home::root))
+        .route("/favicon.ico", get(|| async { axum::http::StatusCode::NO_CONTENT }))
         .route("/auth/login", post(auth::login))
         .route("/auth/refresh", post(auth::refresh))
         .route("/auth/logout", post(auth::logout))
