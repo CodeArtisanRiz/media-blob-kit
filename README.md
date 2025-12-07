@@ -304,6 +304,11 @@ The [`IMPLEMENTATION.md`](IMPLEMENTATION.md) file outlines a comprehensive 10-ph
 - ✅ Completed: Endpoint Documentation
 - ✅ Completed: Swagger UI
 
+**Phase 12: Dockerization**
+- ⏳ Pending: Dockerfile (Alpine)
+- ⏳ Pending: docker-compose.yml
+- ⏳ Pending: Superuser via Env variables
+
 See [`IMPLEMENTATION.md`](IMPLEMENTATION.md) for detailed task breakdowns.
 
 ## 🔐 Security Notes

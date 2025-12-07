@@ -190,3 +190,13 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [x] Setup Swagger UI at `/swagger-ui`.
     - [x] Configure interactive API testing interface.
     - [x] Update README with Swagger UI access instructions.
+
+## Phase 12: Dockerization
+**Goal**: Containerize the application for easy deployment and distribution.
+
+- [ ] **Dockerization**
+    - [ ] Use Alpine Linux for minimal image size.
+    - [ ] Optimize Dockerfile layers.
+    - [ ] Use environment variables from `.env`.
+- [ ] **Startup Initialization**
+    - [ ] Auto-create superuser from environment variables (`SU_USERNAME`, `SU_PASSWORD`) if defined and not already present.
