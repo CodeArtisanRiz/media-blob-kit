@@ -18,7 +18,7 @@ use clap::{Parser, Subcommand};
 use entities::user;
 use migration::{Migrator, MigratorTrait};
 use routes::create_routes;
-use sea_orm::{ActiveModelTrait, Database, Set};
+use sea_orm::{ActiveModelTrait, ColumnTrait, Database, EntityTrait, QueryFilter, Set};
 use uuid::Uuid;
 
 #[derive(Parser)]
@@ -88,6 +88,40 @@ async fn main() {
         None => {
             // build our application using the routes module
             let app = create_routes(db.clone());
+
+            // Auto-create superuser if configured
+            if let (Some(username), Some(password)) = (&config.su_username, &config.su_password) {
+                let user_exists = user::Entity::find()
+                    .filter(user::Column::Username.eq(username))
+                    .one(&db)
+                    .await
+                    .expect("Failed to check for existing user");
+
+                if user_exists.is_none() {
+                    let salt = SaltString::generate(&mut OsRng);
+                    let argon2 = Argon2::default();
+                    let password_hash = argon2
+                        .hash_password(password.as_bytes(), &salt)
+                        .unwrap()
+                        .to_string();
+
+                    let user = user::ActiveModel {
+                        id: Set(Uuid::new_v4()),
+                        username: Set(username.clone()),
+                        password: Set(password_hash),
+                        role: Set(user::Role::Su),
+                        created_at: Set(chrono::Utc::now().naive_utc()),
+                        ..Default::default()
+                    };
+
+                    match user.insert(&db).await {
+                        Ok(_) => println!("Auto-created superuser '{}'", username),
+                        Err(e) => eprintln!("Failed to auto-create superuser: {}", e),
+                    }
+                } else {
+                    println!("Superuser '{}' already exists, skipping creation", username);
+                }
+            }
 
             // Spawn background worker
             let worker_db = db.clone();

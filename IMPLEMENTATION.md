@@ -195,8 +195,32 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
 **Goal**: Containerize the application for easy deployment and distribution.
 
 - [ ] **Dockerization**
-    - [ ] Use Alpine Linux for minimal image size.
+    - [ ] Use Alpine Linux (3.23.0) for minimal image size.
     - [ ] Optimize Dockerfile layers.
     - [ ] Use environment variables from `.env`.
 - [ ] **Startup Initialization**
     - [ ] Auto-create superuser from environment variables (`SU_USERNAME`, `SU_PASSWORD`) if defined and not already present.
+
+## Phase 13: Logs
+**Goal**: Store temporary logs locally and sync them to a centralized logging application.
+
+- [ ] **Logs Table**
+    - [ ] Create migration for `logs` table.
+        - [ ] Columns: `id`, `level` (info/error/warn), `message`, `context` (JSON), `is_synced` (boolean), `created_at`.
+- [ ] **Log Storage Logic**
+    - [ ] Update logging middleware/service to store logs in the `logs` table instead of/in addition to stdout.
+- [x] **Log Synchronization**
+    - [x] Configuration:
+        - [x] Add `LOG_SYNC_URL` to `.env` (Target `POST` endpoint).
+        - [x] Add `LOG_SYNC_INTERVAL` (Fixed time/interval for bg job).
+        - [x] Add `LOG_SYNC_BATCH_SIZE` (Chunk size to avoid large payloads).
+    - [ ] Background Job:
+        - [ ] **Startup Check**: Check if `LOG_SYNC_URL` is set.
+            - [ ] If missing: Log "Log sync disabled: LOG_SYNC_URL not set" to stdout and skip job scheduling.
+            - [ ] If present: Schedule job at `LOG_SYNC_INTERVAL`.
+        - [ ] Fetch pending logs (`is_synced = false`).
+        - [ ] Send in chunks/batches if count > `LOG_SYNC_BATCH_SIZE`.
+        - [ ] API Integration: `POST` to `LOG_SYNC_URL`.
+    - [ ] Mark logs as `is_synced = true` upon successful sync.
+- [ ] **Log Cleanup**
+    - [ ] Implement a cleanup job to delete local logs that are `is_synced = true` AND older than 7 days.
