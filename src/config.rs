@@ -11,6 +11,8 @@ pub struct Config {
     pub s3_bucket_name: String,
     pub s3_endpoint: Option<String>,
     pub worker_concurrency: usize,
+    pub su_username: Option<String>,
+    pub su_password: Option<String>,
 }
 
 impl Config {
@@ -22,6 +24,8 @@ impl Config {
         let aws_secret_access_key = env::var("AWS_SECRET_ACCESS_KEY").expect("AWS_SECRET_ACCESS_KEY must be set");
         let s3_bucket_name = env::var("S3_BUCKET_NAME").expect("S3_BUCKET_NAME must be set");
         let s3_endpoint = env::var("S3_ENDPOINT").ok();
+        let su_username = env::var("SU_USERNAME").ok();
+        let su_password = env::var("SU_PASSWORD").ok();
 
         Self {
             database_url,
@@ -35,6 +39,8 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(1),
+            su_username,
+            su_password,
         }
     }
 }

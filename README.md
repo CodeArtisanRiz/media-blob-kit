@@ -67,6 +67,28 @@ cargo run --release
 
 The server will start on `http://0.0.0.0:3000`.
 
+### Deploy via Docker
+
+1. Create a `.env` file with your configuration (see [Setup](#setup)).
+2. Build the Docker image:
+
+```bash
+docker build -t media-blob-kit .
+```
+
+3. Run the Docker container:
+
+```bash
+docker run --rm --name media-blob-app --env-file .env -p 3000:3000 media-blob-kit
+```
+
+You can also optionally create a superuser on startup by adding the following to your `.env` file:
+
+```env
+SU_USERNAME=admin
+SU_PASSWORD=secure_password
+```
+
 
 ## 📦 Project Overview
 MediaBlobKit is a Rust-based web application built with Axum, SeaORM, and PostgreSQL. It's designed to be a media blob management system with user authentication and role-based access control.
@@ -305,9 +327,9 @@ The [`IMPLEMENTATION.md`](IMPLEMENTATION.md) file outlines a comprehensive 10-ph
 - ✅ Completed: Swagger UI
 
 **Phase 12: Dockerization**
-- ⏳ Pending: Dockerfile (Alpine)
-- ⏳ Pending: docker-compose.yml
-- ⏳ Pending: Superuser via Env variables
+- ✅ Completed: Dockerfile (Alpine)
+- ✅ Completed: docker-compose.yml
+- ✅ Completed: Superuser via Env variables
 
 See [`IMPLEMENTATION.md`](IMPLEMENTATION.md) for detailed task breakdowns.
 

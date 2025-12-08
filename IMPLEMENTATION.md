@@ -191,15 +191,15 @@ This document outlines the step-by-step implementation plan for the MediaBlobKit
     - [x] Configure interactive API testing interface.
     - [x] Update README with Swagger UI access instructions.
 
-## Phase 12: Dockerization
+## Phase 12: Dockerization [Completed]
 **Goal**: Containerize the application for easy deployment and distribution.
 
-- [ ] **Dockerization**
-    - [ ] Use Alpine Linux (3.23.0) for minimal image size.
-    - [ ] Optimize Dockerfile layers.
-    - [ ] Use environment variables from `.env`.
-- [ ] **Startup Initialization**
-    - [ ] Auto-create superuser from environment variables (`SU_USERNAME`, `SU_PASSWORD`) if defined and not already present.
+- [x] **Dockerization**
+    - [x] Use Alpine Linux (3.23.0) for minimal image size.
+    - [x] Optimize Dockerfile layers.
+    - [x] Use environment variables from `.env`.
+- [x] **Startup Initialization**
+    - [x] Auto-create superuser from environment variables (`SU_USERNAME`, `SU_PASSWORD`) if defined and not already present.
 
 ## Phase 13: Logs
 **Goal**: Store temporary logs locally and sync them to a centralized logging application.
