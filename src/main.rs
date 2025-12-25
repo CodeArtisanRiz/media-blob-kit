@@ -87,7 +87,8 @@ async fn main() {
         }
         None => {
             // build our application using the routes module
-            let app = create_routes(db.clone());
+            let app = create_routes(db.clone())
+                .layer(tower_http::cors::CorsLayer::permissive());
 
             // Auto-create superuser if configured
             if let (Some(username), Some(password)) = (&config.su_username, &config.su_password) {

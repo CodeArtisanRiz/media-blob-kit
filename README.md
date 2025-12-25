@@ -70,17 +70,40 @@ The server will start on `http://0.0.0.0:3000`.
 ### Deploy via Docker
 
 1. Create a `.env` file with your configuration (see [Setup](#setup)).
-2. Build the Docker image:
+
+#### Option 1: Docker Compose (Recommended)
+
+```bash
+docker-compose up -d
+```
+
+This will build the image and start the container in detached mode. The app will be available on port `4000` (mapped from internal port `3000`).
+
+To rebuild after code changes:
+```bash
+docker-compose up -d --build
+```
+
+To stop:
+```bash
+docker-compose down
+```
+
+#### Option 2: Manual Docker Commands
+
+Build the Docker image:
 
 ```bash
 docker build -t media-blob-kit .
 ```
 
-3. Run the Docker container:
+Run the Docker container:
 
 ```bash
 docker run --rm --name media-blob-app --env-file .env -p 3000:3000 media-blob-kit
 ```
+
+---
 
 You can also optionally create a superuser on startup by adding the following to your `.env` file:
 
